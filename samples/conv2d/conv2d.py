@@ -9,8 +9,8 @@
 """Conv2D pipeline using movement ops plus ``matmul``.
 
 Structure:
-  1. Conv2dKernel  — @kernel with multi-core flat binding + Cin reduction
-  2. conv2d()      — torch interface
+  1. Conv2dKernel  - @kernel with multi-core flat binding + Cin reduction
+  2. conv2d()      - torch interface
 
 Formula:  C[N,Co,Ho,Wo] = Conv2D(x[N,Ci,Hi,Wi], filter[Co,CiG,Kh,Kw])
 
