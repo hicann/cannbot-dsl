@@ -1,5 +1,3 @@
-# cannbot-dsl
-
 # CANNBot-DSL
 
 > 基于 CANNBotDSL 的 Ascend NPU 算子示例集合，提供完整实现、精度测试与性能对比数据。
