@@ -87,7 +87,7 @@ out, final_state = flash_kda(
 
 ## 精度测试
 
-在 Arena 仓库根目录执行：
+测试脚本位于 `test/flash_kda/test_flash_kda.py`，需在 NPU 环境下运行：
 
 ```bash
 pytest -q test/flash_kda/test_flash_kda.py
