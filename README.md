@@ -16,7 +16,7 @@
 
 | 算子 | 公式 | 文档 |
 | :--- | :--- | :--- |
-| voxel_conv | $C[N, Co, Ho, Wo] = \text{Conv2D}(x, filter)$ | [samples/voxel_conv](samples/voxel_conv) |
+| voxel_conv | $C[N, Co, Ho, Wo] = \text{VoxelConv}(x, filter)$ | [samples/voxel_conv](samples/voxel_conv) |
 | flash_attn | $O = softmax(QK^T \cdot scale) V$ | [samples/flash_attn](samples/flash_attn) |
 | flash_kda | Kimi Delta Attention prefill 融合算子 | [samples/flash_kda](samples/flash_kda) |
 | matmul | $C[M,N] = A[M,K] @ B[N,K]^T$ | [samples/matmul](samples/matmul) |
