@@ -525,7 +525,7 @@ class MatmulTiling:
         return self.DEFAULT_CORE_FREQ * self.AIC_NUM * self.DEFAULT_L2_RATE / 1024
 
     def __repr__(self):
-        """Return the key tiling parameters for debugging and logging."""
+        """Return the key tiling parameters."""
         return (
             f"MatmulTiling(M={self.m}, N={self.n}, K={self.k})\n"
             f"  baseM={self.baseM}, baseN={self.baseN}, baseK={self.baseK}\n"
