@@ -1,4 +1,4 @@
-# Conv2D
+# VoxelConv
 
 基于 cannbotdsl 实现的 Conv2D 算子，支持 float16/bfloat16 数据类型，面向 Ascend NPU。
 
@@ -32,22 +32,22 @@ $$
 
 数据流为 GM → L1（MTE2, DN2NZ）→ L0A（MTE1, Load3D）/ L0B（MTE1）→ L0C（M, MMAD）→ GM（FIX, NZ2DN）。
 
-实现详见 `conv2d.py`。
+实现详见 `voxel_conv.py`。
 
 ## 快速开始
 
 ```python
 import torch
 import torch_npu
-from conv2d import conv2d
+from voxel_conv import voxel_conv
 
 x = torch.randn(1, 64, 128, 128, dtype=torch.float16).npu()
 weight = torch.randn(64, 64, 3, 3, dtype=torch.float16).npu()
 
-y = conv2d(x, weight, stride=(1, 1), padding=(1, 1, 1, 1))
+y = voxel_conv(x, weight, stride=(1, 1), padding=(1, 1, 1, 1))
 ```
 
-`conv2d()` 参数说明：
+`voxel_conv()` 参数说明：
 
 | 参数 | shape | dtype | 说明 |
 | :--- | :----: | :---: | :--- |
@@ -63,8 +63,8 @@ y = conv2d(x, weight, stride=(1, 1), padding=(1, 1, 1, 1))
 
 ## 精度测试
 
-测试代码位于 `test/conv2d/test_conv2d.py`，使用 pytest 驱动，运行命令如下：
+测试代码位于 `test/voxel_conv/test_voxel_conv.py`，使用 pytest 驱动，运行命令如下：
 
 ```bash
-pytest test/conv2d/test_conv2d.py -v
+pytest test/voxel_conv/test_voxel_conv.py -v
 ```

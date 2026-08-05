@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Tests for the Conv2D kernel.
+"""Tests for the VoxelConv kernel.
 
 Formula:  C[N,Co,Ho,Wo] = Conv2D(x[N,Ci,Hi,Wi], filter[Co,CiG,Kh,Kw])
 
@@ -27,7 +27,7 @@ import sys
 import pytest
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "samples", "conv2d"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "samples", "voxel_conv"))
 
 import cannbotdsl
 from cannbotdsl import dtypes
@@ -35,7 +35,7 @@ from cannbotdsl.jit_runner import jit
 from cannbotdsl.tensor import make_layout, make_pointer, make_tensor
 from cannbotdsl.typing.types import MemLoc
 
-from conv2d import Conv2dKernel, conv2d
+from voxel_conv import VoxelConvKernel, voxel_conv
 
 
 _INPUT_SHAPE = (1, 20, 5, 7)
@@ -51,27 +51,27 @@ def _make_gm(dtype, shape, address):
 
 
 @pytest.mark.ascendc_toolchain
-def test_conv2d_full_pipeline_compiles(tmp_path, monkeypatch):
+def test_voxel_conv_full_pipeline_compiles(tmp_path, monkeypatch):
     monkeypatch.setenv("CANNBOTDSL_PIPE_STAGE", "compile")
     monkeypatch.setenv("CANNBOTDSL_DUMP_ASCENDC", "1")
     monkeypatch.setenv("CANNBOTDSL_DUMP_DIR", str(tmp_path))
     cannbotdsl.clear_compile_cache()
-    conv = Conv2dKernel(
+    conv = VoxelConvKernel(
         input_shape=_INPUT_SHAPE,
         filter_shape=_FILTER_SHAPE,
         padding=(1, 1, 1, 1),
     )
 
     @jit
-    def compile_conv2d():
+    def compile_voxel_conv():
         gm_x = _make_gm(dtypes.float16, _INPUT_SHAPE, 0)
         gm_filter = _make_gm(dtypes.float16, _FILTER_SHAPE, 4096)
         gm_y = _make_gm(dtypes.float16, conv.spec.output_shape, 12288)
-        conv.conv2d_kernel[1](gm_x, gm_filter, gm_y)
+        conv.voxel_conv_kernel[1](gm_x, gm_filter, gm_y)
 
     try:
-        compile_conv2d()
-        ascendc_path = tmp_path / "compile_conv2d.asc"
+        compile_voxel_conv()
+        ascendc_path = tmp_path / "compile_voxel_conv.asc"
         assert ascendc_path.exists()
         ascendc = ascendc_path.read_text()
         assert "asc_fill_l1_sync(" in ascendc
@@ -81,7 +81,7 @@ def test_conv2d_full_pipeline_compiles(tmp_path, monkeypatch):
         cannbotdsl.clear_compile_cache()
 
 
-def _assert_conv2d_accuracy(
+def _assert_voxel_conv_accuracy(
     *,
     input_shape,
     filter_shape,
@@ -99,7 +99,7 @@ def _assert_conv2d_accuracy(
     x_cpu = torch.randn(input_shape, dtype=torch_dtype) * 0.1
     filter_cpu = torch.randn(filter_shape, dtype=torch_dtype) * 0.1
 
-    y_npu = conv2d(
+    y_npu = voxel_conv(
         x_cpu.npu(),
         filter_cpu.npu(),
         stride=stride,
@@ -126,8 +126,8 @@ def _assert_conv2d_accuracy(
 
 
 @pytest.mark.npu
-def test_conv2d_tail_accuracy():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_tail_accuracy():
+    _assert_voxel_conv_accuracy(
         input_shape=_INPUT_SHAPE,
         filter_shape=_FILTER_SHAPE,
         padding=(1, 1, 1, 1),
@@ -167,10 +167,10 @@ def test_conv2d_tail_accuracy():
         ),
     ],
 )
-def test_conv2d_boundary_accuracy(
+def test_voxel_conv_boundary_accuracy(
     input_shape, filter_shape, stride, padding, dilation, groups
 ):
-    _assert_conv2d_accuracy(
+    _assert_voxel_conv_accuracy(
         input_shape=input_shape,
         filter_shape=filter_shape,
         stride=stride,
@@ -181,8 +181,8 @@ def test_conv2d_boundary_accuracy(
 
 
 @pytest.mark.npu
-def test_conv2d_bfloat16_accuracy():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_bfloat16_accuracy():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 16, 4, 4),
         filter_shape=(16, 16, 3, 3),
         padding=(1, 1, 1, 1),
@@ -191,8 +191,8 @@ def test_conv2d_bfloat16_accuracy():
 
 
 @pytest.mark.npu
-def test_conv2d_1x1_baseline():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_1x1_baseline():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 32, 8, 8),
         filter_shape=(32, 32, 1, 1),
         stride=(1, 1),
@@ -201,8 +201,8 @@ def test_conv2d_1x1_baseline():
 
 
 @pytest.mark.npu
-def test_conv2d_stride2_downsample():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_stride2_downsample():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 16, 32, 32),
         filter_shape=(16, 16, 3, 3),
         stride=(2, 2),
@@ -211,8 +211,8 @@ def test_conv2d_stride2_downsample():
 
 
 @pytest.mark.npu
-def test_conv2d_dilation2():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_dilation2():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 16, 16, 16),
         filter_shape=(16, 16, 3, 3),
         stride=(1, 1),
@@ -222,8 +222,8 @@ def test_conv2d_dilation2():
 
 
 @pytest.mark.npu
-def test_conv2d_large_feature_map():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_large_feature_map():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 64, 128, 128),
         filter_shape=(64, 64, 3, 3),
         stride=(1, 1),
@@ -232,8 +232,8 @@ def test_conv2d_large_feature_map():
 
 
 @pytest.mark.npu
-def test_conv2d_multi_batch():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_multi_batch():
+    _assert_voxel_conv_accuracy(
         input_shape=(17, 16, 16, 16),
         filter_shape=(16, 16, 3, 3),
         stride=(1, 1),
@@ -242,8 +242,8 @@ def test_conv2d_multi_batch():
 
 
 @pytest.mark.npu
-def test_conv2d_depthwise_groups():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_depthwise_groups():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 16, 8, 8),
         filter_shape=(16, 1, 3, 3),
         stride=(1, 1),
@@ -253,8 +253,8 @@ def test_conv2d_depthwise_groups():
 
 
 @pytest.mark.npu
-def test_conv2d_asymmetric_kernel():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_asymmetric_kernel():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 16, 16, 16),
         filter_shape=(16, 16, 1, 3),
         stride=(1, 1),
@@ -263,8 +263,8 @@ def test_conv2d_asymmetric_kernel():
 
 
 @pytest.mark.npu
-def test_conv2d_5x5_kernel():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_5x5_kernel():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 16, 16, 16),
         filter_shape=(16, 16, 5, 5),
         stride=(1, 1),
@@ -273,8 +273,8 @@ def test_conv2d_5x5_kernel():
 
 
 @pytest.mark.npu
-def test_conv2d_non_aligned_channels():
-    _assert_conv2d_accuracy(
+def test_voxel_conv_non_aligned_channels():
+    _assert_voxel_conv_accuracy(
         input_shape=(1, 20, 16, 16),
         filter_shape=(18, 20, 3, 3),
         stride=(1, 1),

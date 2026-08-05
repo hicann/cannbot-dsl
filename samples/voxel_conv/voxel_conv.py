@@ -6,11 +6,11 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Conv2D pipeline using movement ops plus ``matmul``.
+"""VoxelConv pipeline using movement ops plus ``matmul``.
 
 Structure:
-  1. Conv2dKernel  - @kernel with multi-core flat binding + Cin reduction
-  2. conv2d()      - torch interface
+  1. VoxelConvKernel  - @kernel with multi-core flat binding + Cin reduction
+  2. voxel_conv()     - torch interface
 
 Formula:  C[N,Co,Ho,Wo] = Conv2D(x[N,Ci,Hi,Wi], filter[Co,CiG,Kh,Kw])
 
@@ -39,12 +39,12 @@ from cannbotdsl.runtime import from_torch_npu
 from cannbotdsl.tensor import mem_copy
 from cannbotdsl.typing.types import MemLoc, Tensor
 
-__all__ = ["conv2d"]
+__all__ = ["voxel_conv"]
 
 _DEFAULT_TILE_SHAPE = (16, 16, 16)
 
 
-class Conv2dKernel:
+class VoxelConvKernel:
     """Conv2D kernel with multi-core flat binding.
 
     tiling flow:
@@ -87,7 +87,7 @@ class Conv2dKernel:
         self.block_num = min(total_work, block_num)
 
     @kernel
-    def conv2d_kernel(self, gm_x: Tensor, gm_filter: Tensor, gm_y: Tensor):
+    def voxel_conv_kernel(self, gm_x: Tensor, gm_filter: Tensor, gm_y: Tensor):
         bm, bn, bc = self.tile_shape
         khkw = self.spec.kernel_height * self.spec.kernel_width
 
@@ -210,10 +210,10 @@ class Conv2dKernel:
 
     @jit
     def run(self, gm_x: Tensor, gm_filter: Tensor, gm_y: Tensor):
-        self.conv2d_kernel[self.block_num](gm_x, gm_filter, gm_y)
+        self.voxel_conv_kernel[self.block_num](gm_x, gm_filter, gm_y)
 
 
-def conv2d(
+def voxel_conv(
     x: torch.Tensor,
     weight: torch.Tensor,
     *,
@@ -224,7 +224,7 @@ def conv2d(
     tile_shape=_DEFAULT_TILE_SHAPE,
     block_num=32,
 ) -> torch.Tensor:
-    """Torch-facing wrapper for the Conv2D kernel.
+    """Torch-facing wrapper for the VoxelConv kernel.
 
     The kernel computes standard 2D convolution with NCHW input/output
     and OIHW filter layout. This wrapper delegates geometry to
@@ -232,7 +232,7 @@ def conv2d(
     synchronously launches the JIT-compiled multi-core kernel.
     """
     dtype = dtypes.float16 if x.dtype == torch.float16 else dtypes.bfloat16
-    op = Conv2dKernel(
+    op = VoxelConvKernel(
         dtype=dtype,
         input_shape=tuple(x.shape),
         filter_shape=tuple(weight.shape),
