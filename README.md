@@ -8,7 +8,7 @@
 
 ## 概述
 
-当前仓库中的 samples 使用 CANNBot 基于 CANNBot-DSL 开发，涵盖 Flash Attention、VoxelConv、Kimi Delta Attention 等复杂算子。本次仅开源样例代码，自定义开发、测试等功能将于近期发布，敬请期待。
+当前仓库中的 samples 使用 CANNBot 基于 CANNBot-DSL 生成，涵盖 VoxelConv、PointNet Set Abstraction、Flash Attention、Kimi Delta Attention 等复杂算子。本次开源样例代码，自定义开发、测试等功能将于近期发布，敬请期待。
 
 项目面向 NPU ARCH 3510（Ascend 950PR / Ascend 950DT），详见 [算子列表](#算子列表)。
 
@@ -20,9 +20,8 @@
 | flash_attn | $O = softmax(QK^T \cdot scale) V$ | [samples/flash_attn](samples/flash_attn) |
 | flash_kda | Kimi Delta Attention prefill 融合算子 | [samples/flash_kda](samples/flash_kda) |
 | matmul | $C[M,N] = A[M,K] @ B[N,K]^T$ | [samples/matmul](samples/matmul) |
+| pointnet_sa | $\text{feat}[K, D_{out}] = \max_{j} \text{MLP}(\text{points}[K, j, D_{in}])$ | [samples/pointnet_sa](samples/pointnet_sa) |
 | rms_norm | $y = x \cdot rstd \cdot \gamma$ | [samples/rms_norm](samples/rms_norm) |
-
-> **支持架构**：NPU ARCH 3510（Ascend 950PR / Ascend 950DT）
 
 ## 目录结构
 
@@ -32,12 +31,14 @@
 │   ├── flash_attn/     # Flash Attention
 │   ├── flash_kda/      # Kimi Delta Attention
 │   ├── matmul/         # 非量化矩阵乘
+│   ├── pointnet_sa/    # PointNet Set Abstraction
 │   └── rms_norm/       # RmsNorm 归一化
 ├── test/               # 测试
 │   ├── voxel_conv/
 │   ├── flash_attn/
 │   ├── flash_kda/
 │   ├── matmul/
+│   ├── pointnet_sa/
 │   └── rms_norm/
 ├── media/
 └── README.md
