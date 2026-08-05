@@ -1,6 +1,6 @@
 # CANNBot-DSL
 
-> 基于 CANNBot-DSL 的 Ascend NPU 算子示例集合。
+> 基于 CANNBot-DSL 的 Ascend NPU 复杂算子示例集合。
 
 [📖 概述](#概述) · [📦 算子列表](#算子列表) · [📂 目录结构](#目录结构) · [📜 许可证](#许可证)
 
@@ -8,9 +8,9 @@
 
 ## 概述
 
-当前仓库中的 samples 使用 CANNBot 基于 CANNBot-DSL 开发。本次仅开源样例代码，自定义开发、测试等功能将于近期发布，敬请期待。
+当前仓库中的 samples 使用 CANNBot 基于 CANNBot-DSL 开发，涵盖 Flash Attention、Conv2D、Kimi Delta Attention 等复杂算子。本次仅开源样例代码，自定义开发、测试等功能将于近期发布，敬请期待。
 
-项目面向 NPU ARCH 3510（Ascend 950PR / Ascend 950DT），提供了 conv2d、flash_attn、flash_kda、matmul、rms_norm 等算子示例供开发者参考，详见 [算子列表](#算子列表)。
+项目面向 NPU ARCH 3510（Ascend 950PR / Ascend 950DT），详见 [算子列表](#算子列表)。
 
 ## 算子列表
 
