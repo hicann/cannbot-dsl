@@ -2115,7 +2115,11 @@ def flash_kda(
     else:
         out = torch.empty(batch, n_v, seq_len, dim, dtype=LOW_DTYPE, device=q.device)
         out_physical = out
-    final_state = torch.empty_like(initial_state)
+    final_state = torch.empty(
+        initial_state.shape,
+        dtype=initial_state.dtype,
+        device=initial_state.device,
+    )
     # group / dv_base 均按实际 bn 分桶（dv_base：少头切 Dv；group：少头用大 group 减 barrier），
     # 一并作为下面动态 kernel 缓存的 key；B/S 仍动态复用（末尾 group 由 group_count 运行时夹取）。
     dv_base = int(os.environ.get("KDA_DV_BASE") or get_dv_base_config(bn_total, seq_len))

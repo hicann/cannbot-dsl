@@ -21,6 +21,9 @@ import torch.nn.functional as F
 
 CHUNK_SIZE = 64
 HEAD_DIM = 128
+REFERENCE_BLOCK_SIZE = 16
+DEFAULT_CASE = (1, 32, 2048, HEAD_DIM)
+DEFAULT_LOWER_BOUND = -5.0
 _TOLERANCE = 5e-3
 
 
@@ -40,9 +43,10 @@ class KdaInputs:
 
 def _make_inputs(*, seed: int) -> KdaInputs:
     generator = torch.Generator(device="cpu").manual_seed(seed)
-    batch, value_heads, key_heads, sequence_length = 1, 2, 1, CHUNK_SIZE
-    qk_shape = (batch, key_heads, sequence_length, HEAD_DIM)
-    value_shape = (batch, value_heads, sequence_length, HEAD_DIM)
+    batch, value_heads, sequence_length, dim = DEFAULT_CASE
+    key_heads = value_heads
+    qk_shape = (batch, key_heads, sequence_length, dim)
+    value_shape = (batch, value_heads, sequence_length, dim)
     return KdaInputs(
         k=F.normalize(torch.randn(qk_shape, generator=generator), p=2, dim=-1).bfloat16(),
         v=torch.randn(value_shape, generator=generator).bfloat16(),
@@ -50,12 +54,12 @@ def _make_inputs(*, seed: int) -> KdaInputs:
         beta=torch.randn((batch, value_heads, sequence_length, 1), generator=generator).bfloat16(),
         g=torch.randn(value_shape, generator=generator).bfloat16(),
         initial_state=torch.rand(
-            (batch, value_heads, HEAD_DIM, HEAD_DIM), generator=generator, dtype=torch.float32
-        ),
-        scale=HEAD_DIM ** -0.5,
+            (batch, value_heads, dim, dim), generator=generator, dtype=torch.float32
+        ) * 0.1,
+        scale=dim ** -0.5,
         a_log=torch.linspace(-1.0, 0.5, value_heads, dtype=torch.float32),
-        dt_bias=torch.randn((value_heads, HEAD_DIM), generator=generator, dtype=torch.float32),
-        lower_bound=-1.0,
+        dt_bias=torch.randn((value_heads, dim), generator=generator, dtype=torch.float32),
+        lower_bound=DEFAULT_LOWER_BOUND,
     )
 
 
@@ -74,67 +78,80 @@ def _expand_gqa(inputs: KdaInputs) -> tuple[torch.Tensor, torch.Tensor]:
     )
 
 
-@dataclasses.dataclass(frozen=True)
-class _StageOne:
-    q_decayed: torch.Tensor
-    mqk: torch.Tensor
-    k_restored: torch.Tensor
-    gamma_c: torch.Tensor
-    u_pre: torch.Tensor
-    w: torch.Tensor
+def _chunk_major(values: torch.Tensor) -> torch.Tensor:
+    batch, heads, sequence_length, dim = values.shape
+    return values.reshape(
+        batch, heads, sequence_length // CHUNK_SIZE, CHUNK_SIZE, dim
+    ).contiguous()
 
 
-def _lower_matmul(
+def _reference_lower_matmul(
     left: torch.Tensor,
     right: torch.Tensor,
     cumulative_decay: torch.Tensor,
     *,
     diagonal: int,
 ) -> torch.Tensor:
-    result = torch.empty(
-        (*left.shape[:-1], CHUNK_SIZE), dtype=torch.float32, device=left.device
+    """Compute causal tiles with CANNDSL's 16-token relative-decay references."""
+    result = torch.zeros(
+        *left.shape[:-1], right.shape[-2], dtype=torch.float32, device=left.device
     )
-    for row in range(CHUNK_SIZE):
-        relative_decay = (cumulative_decay[:, :, row : row + 1] - cumulative_decay).exp()
-        result[:, :, row] = (
-            (left[:, :, row : row + 1] * relative_decay[:, :, row : row + 1])
-            @ (right * relative_decay).transpose(-1, -2)
-        ).squeeze(-2)
+    for row_start in range(0, CHUNK_SIZE, REFERENCE_BLOCK_SIZE):
+        row_end = row_start + REFERENCE_BLOCK_SIZE
+        reference = cumulative_decay[..., row_start : row_start + 1, :]
+        left_rows = left[..., row_start:row_end, :] * (
+            cumulative_decay[..., row_start:row_end, :] - reference
+        ).exp()
+        for col_start in range(0, row_end, REFERENCE_BLOCK_SIZE):
+            col_end = col_start + REFERENCE_BLOCK_SIZE
+            right_cols = right[..., col_start:col_end, :] * (
+                reference - cumulative_decay[..., col_start:col_end, :]
+            ).exp()
+            result[..., row_start:row_end, col_start:col_end] = (
+                left_rows @ right_cols.transpose(-1, -2)
+            )
     return result * torch.tril(
-        torch.ones((CHUNK_SIZE, CHUNK_SIZE), dtype=torch.float32), diagonal=diagonal
-    )
-
-
-def _stage_one(inputs: KdaInputs) -> _StageOne:
-    gate, beta = _activate(inputs)
-    k, q = _expand_gqa(inputs)
-    cumulative_decay = gate.cumsum(dim=-2)
-    gamma = cumulative_decay.exp()
-    k_decayed = gamma * k
-    q_decayed = gamma * q * inputs.scale
-    transition = _lower_matmul(beta * k, k, cumulative_decay, diagonal=-1)
-    inverse_beta = torch.linalg.solve_triangular(
-        torch.eye(CHUNK_SIZE).expand_as(transition) + transition,
-        torch.diag_embed(beta.squeeze(-1)),
-        upper=False,
-        unitriangular=True,
-    )
-    return _StageOne(
-        q_decayed=q_decayed,
-        mqk=_lower_matmul(q * inputs.scale, k, cumulative_decay, diagonal=0),
-        k_restored=k * (cumulative_decay[:, :, -1:] - cumulative_decay).exp(),
-        gamma_c=gamma[:, :, -1].unsqueeze(-1),
-        u_pre=inverse_beta @ inputs.v.float(),
-        w=inverse_beta @ k_decayed,
+        torch.ones((CHUNK_SIZE, CHUNK_SIZE), dtype=torch.float32, device=left.device),
+        diagonal=diagonal,
     )
 
 
 def _cpu_chunk(inputs: KdaInputs) -> tuple[torch.Tensor, torch.Tensor]:
-    stage_one = _stage_one(inputs)
+    gate, beta = _activate(inputs)
+    k, q = _expand_gqa(inputs)
+    k = _chunk_major(k)
+    q = _chunk_major(q)
+    v = _chunk_major(inputs.v.float())
+    gate = _chunk_major(gate)
+    beta = _chunk_major(beta)
+    cumulative_decay = gate.cumsum(dim=-2)
+    gamma = cumulative_decay.exp()
+    k_decayed = gamma * k
+    q_decayed = gamma * q * inputs.scale
+    transition = _reference_lower_matmul(beta * k, k, cumulative_decay, diagonal=-1)
+    inverse_beta = torch.linalg.solve_triangular(
+        torch.eye(CHUNK_SIZE, dtype=torch.float32, device=k.device) + transition,
+        torch.diag_embed(beta.squeeze(-1)),
+        upper=False,
+        unitriangular=True,
+    )
+    mqk = _reference_lower_matmul(q * inputs.scale, k, cumulative_decay, diagonal=0)
+    k_restored = k * (cumulative_decay[..., -1:, :] - cumulative_decay).exp()
+    gamma_c = gamma[..., -1, :, None].contiguous()
+    u_pre = inverse_beta @ v
+    w = inverse_beta @ k_decayed
+
     state = inputs.initial_state.float().clone()
-    u = stage_one.u_pre - stage_one.w @ state
-    output = stage_one.q_decayed @ state + stage_one.mqk @ u
-    state = stage_one.gamma_c * state + stage_one.k_restored.transpose(-1, -2) @ u
+    output = torch.empty_like(q_decayed)
+    for chunk_index in range(u_pre.shape[2]):
+        u = u_pre[:, :, chunk_index] - w[:, :, chunk_index] @ state
+        o_state = q_decayed[:, :, chunk_index] @ state
+        state = (
+            gamma_c[:, :, chunk_index] * state
+            + k_restored[:, :, chunk_index].transpose(-1, -2) @ u
+        )
+        output[:, :, chunk_index] = o_state + mqk[:, :, chunk_index] @ u
+    output = output.reshape(inputs.v.shape).contiguous()
     return output, state.transpose(-1, -2).contiguous()
 
 
