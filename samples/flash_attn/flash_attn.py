@@ -460,15 +460,11 @@ class Vector:
         if not div_done:
             self._finalize_div_vf(sm_sum_buf, actual_vec_m)
 
-        o_slot = self.o_ub.acquire()
-        o_full = local_slice(o_slot, (self.tile_vec_m, self.tile_d), stride=(self.tile_d, 1))
+        o_full = local_slice(self.o_ub, (self.tile_vec_m, self.tile_d), stride=(self.tile_d, 1))
         cast(o_full, self.res_o)
-        self.o_ub.commit(o_slot)
 
-        o_slot_r = self.o_ub.wait()
-        o_view_r = local_slice(o_slot_r, (actual_vec_m, self.tile_d), stride=(self.tile_d, 1))
+        o_view_r = local_slice(self.o_ub, (actual_vec_m, self.tile_d), stride=(self.tile_d, 1))
         mem_copy(half, o_view_r)
-        self.o_ub.release(o_slot_r)
 
 
 @kernel
