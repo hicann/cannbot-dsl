@@ -239,8 +239,6 @@ class RowFullLoadKernel:
             _cast_b16_to_fp32(
                 self._gamma_16_ch, self._gamma_fp32, self._num_seg, ct,
             )
-            with vf(mode="raw"):
-                vmem_bar(mode="vst_vld")
         else:
             mem_copy(
                 self._gamma_fp32,
@@ -315,9 +313,6 @@ class ColSplitKernel:
                         self._x_db_ch, self._tile_squared_sum_buffer, t, self._tmp,
                     )
 
-                with vf(mode="raw"):
-                    vmem_bar(mode="vst_vld")
-
                 self._compute_rstd(
                     self._tile_squared_sum_buffer, self._rstd_ch, self._rstd_gm_ch, avg, epsilon,
                 )
@@ -342,8 +337,6 @@ class ColSplitKernel:
             _cast_b16_to_fp32(
                 self._gamma_16_ch, self._gamma_fp32, self._num_seg, ct,
             )
-            with vf(mode="raw"):
-                vmem_bar(mode="vst_vld")
         else:
             mem_copy(
                 self._gamma_fp32,
