@@ -5,7 +5,6 @@
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-
 import dataclasses
 import os
 from typing import NamedTuple, Optional, Tuple
@@ -824,7 +823,6 @@ class StageOneVector:
             MemLoc.UB, (NEUMANN_BLOCK_SIZE, D_HALF), dtypes.bfloat16, depth=2,
             data_format="nz", n1_pad=16,
         )
-
         self.l1_per_d_operand = Channel(MemLoc.L1, (NEUMANN_BLOCK_SIZE, self.head_dim), dtypes.bfloat16, depth=3, kind=ChannelKind.CrossCore)
         self.l1_V_beta = Channel(MemLoc.L1, (CHUNK_SIZE, self.head_dim), dtypes.bfloat16, depth=1, kind=ChannelKind.CrossCore)
         self.l1_K_decayed_beta_for_W = Channel( MemLoc.L1, (CHUNK_SIZE, self.head_dim), dtypes.bfloat16,
@@ -897,33 +895,25 @@ class StageOneVector:
         k_chunk = tile_view(gm_K[batch_idx, qk_head_idx, None, None], (CHUNK_SIZE, SUPPORTED_HEAD_DIM), (chunk_idx, Int64(0)))
 
         if self.subblock_idx == Int64(0):
-            q_write = self.ub_q.acquire()
-            mem_copy(q_write, q_chunk)
-            self.ub_q.commit(q_write)
+            mem_copy(self.ub_q, q_chunk)
             vec_sync_notify(PIPE.MTE2, PIPE.V, MTE2_TO_V_EVENT_ID)
             vec_sync_wait(PIPE.MTE2, PIPE.V, MTE2_TO_V_EVENT_ID)
-            q_read = self.ub_q.wait()
-            self.normalize_full_d_bf16(q_read)
+            self.normalize_full_d_bf16(self.ub_q)
             with vf(outputs=[self.ub_q_bf16]):
-                mem_copy(self.ub_q_bf16, local_slice(q_read, (CHUNK_SIZE, D_HALF), stride=(SUPPORTED_HEAD_DIM, 1), offset=0))
+                mem_copy(self.ub_q_bf16, local_slice(self.ub_q, (CHUNK_SIZE, D_HALF), stride=(SUPPORTED_HEAD_DIM, 1), offset=0))
             with vf(outputs=[self.ub_qk_exchange]):
-                cast(self.ub_qk_exchange, local_slice(q_read, (CHUNK_SIZE, D_HALF), stride=(SUPPORTED_HEAD_DIM, 1), offset=D_HALF * 2))
-            self.ub_q.release(q_read)
+                cast(self.ub_qk_exchange, local_slice(self.ub_q, (CHUNK_SIZE, D_HALF), stride=(SUPPORTED_HEAD_DIM, 1), offset=D_HALF * 2))
             self.publish_normalized_qk_half(q_to_k, self.ub_qk_exchange)
         else:
-            k_write = self.ub_k.acquire()
-            mem_copy(k_write, k_chunk)
-            self.ub_k.commit(k_write)
+            mem_copy(self.ub_k, k_chunk)
             vec_sync_all()
             vec_sync_notify(PIPE.MTE2, PIPE.V, MTE2_TO_V_SUBBLOCK1_EVENT_ID)
             vec_sync_wait(PIPE.MTE2, PIPE.V, MTE2_TO_V_SUBBLOCK1_EVENT_ID)
-            k_read = self.ub_k.wait()
-            self.normalize_full_d_bf16(k_read)
+            self.normalize_full_d_bf16(self.ub_k)
             with vf(outputs=[self.ub_k_bf16]):
-                mem_copy(self.ub_k_bf16, local_slice(k_read, (CHUNK_SIZE, D_HALF), stride=(SUPPORTED_HEAD_DIM, 1), offset=D_HALF * 2))
+                mem_copy(self.ub_k_bf16, local_slice(self.ub_k, (CHUNK_SIZE, D_HALF), stride=(SUPPORTED_HEAD_DIM, 1), offset=D_HALF * 2))
             with vf(outputs=[self.ub_qk_exchange]):
-                cast(self.ub_qk_exchange, local_slice(k_read, (CHUNK_SIZE, D_HALF), stride=(SUPPORTED_HEAD_DIM, 1), offset=0))
-            self.ub_k.release(k_read)
+                cast(self.ub_qk_exchange, local_slice(self.ub_k, (CHUNK_SIZE, D_HALF), stride=(SUPPORTED_HEAD_DIM, 1), offset=0))
             self.publish_normalized_qk_half(k_to_q, self.ub_qk_exchange)
 
         return q_to_k, k_to_q
@@ -966,62 +956,37 @@ class StageOneVector:
         g_chunk = tile_view(gm_g[batch_idx, head_idx, None, None], (CHUNK_SIZE, D_HALF), (chunk_idx, self.subblock_idx))
         bias_half = tile_view(gm_dt_bias[head_idx, None], (D_HALF,), (self.subblock_idx,))
         alpha = tile_view(gm_A_log, (1,), (head_idx,))
-        g_write = self.ub_g_raw.acquire()
-        bias_write = self.ub_dt_bias.acquire()
-        alpha_write = self.ub_alpha.acquire()
-        mem_copy(g_write, g_chunk)
-        mem_copy(bias_write, bias_half)
-        mem_copy(alpha_write, alpha)
-        self.ub_g_raw.commit(g_write)
-        self.ub_dt_bias.commit(bias_write)
-        self.ub_alpha.commit(alpha_write)
+        mem_copy(self.ub_g_raw, g_chunk)
+        mem_copy(self.ub_dt_bias, bias_half)
+        mem_copy(self.ub_alpha, alpha)
         vec_sync_notify(PIPE.MTE2, PIPE.V, MTE2_TO_V_EVENT_ID)
         vec_sync_wait(PIPE.MTE2, PIPE.V, MTE2_TO_V_EVENT_ID)
-        g_read = self.ub_g_raw.wait()
-        bias_read = self.ub_dt_bias.wait()
-        alpha_read = self.ub_alpha.wait()
-        gate_write = self.ub_gate_activated.acquire()
         with vf(mode="raw"):
             lane_mask, _ = update_mask(D_HALF, elem_bits=32)
             bound = vdup_scalar(lower_bound, dtypes.float32, mask=lane_mask)
             one = vdup_scalar(1.0, dtypes.float32, mask=lane_mask)
-            alpha_exp = vexp(vload_brc(alpha_read, 0), mask=lane_mask)
+            alpha_exp = vexp(vload_brc(self.ub_alpha, 0), mask=lane_mask)
             neg_exp_a = vmuls(alpha_exp, -1.0, mask=lane_mask)
             for row in dsl_range(Int64(0), Int64(CHUNK_SIZE), Int64(1), unroll=4):
                 offset = row * Int64(D_HALF)
-                raw_g = vcast(vload_unpack(g_read, offset, mode=UnpackMode.B16_TO_B32), dtypes.float32, mask=lane_mask)
-                gate_logit = vmul(neg_exp_a, vadd(raw_g, vload(bias_read, 0), mask=lane_mask), mask=lane_mask)
+                raw_g = vcast(vload_unpack(self.ub_g_raw, offset, mode=UnpackMode.B16_TO_B32), dtypes.float32, mask=lane_mask)
+                gate_logit = vmul(neg_exp_a, vadd(raw_g, vload(self.ub_dt_bias, 0), mask=lane_mask), mask=lane_mask)
                 gate = vdiv(bound, vadd(one, vexp(gate_logit, mask=lane_mask), mask=lane_mask), mask=lane_mask)
-                vstore(gate_write, offset, gate, lane_mask)
+                vstore(self.ub_gate_activated, offset, gate, lane_mask)
             vmem_bar("vst_vld")
-        self.ub_g_raw.release(g_read)
-        self.ub_dt_bias.release(bias_read)
-        self.ub_alpha.release(alpha_read)
-        self.ub_gate_activated.commit(gate_write)
         vec_sync_all()
-        gate_read = self.ub_gate_activated.wait()
-        g_cumsum_write = self.ub_g_cumsum.acquire()
-        cumsum(g_cumsum_write, gate_read, axis=0)
-        self.ub_gate_activated.release(gate_read)
-        self.ub_g_cumsum.commit(g_cumsum_write)
-        return self.ub_g_cumsum.wait()
-
-    def release_gate_cumsum(self, g_cumsum_read):
-        self.ub_g_cumsum.release(g_cumsum_read)
+        cumsum(self.ub_g_cumsum, self.ub_gate_activated, axis=0)
+        return self.ub_g_cumsum
 
     @jit
     def activate_raw_beta(self, gm_beta, batch_idx, head_idx, chunk_idx):
         """Apply sigmoid to one raw BF16 beta-logit chunk."""
         beta_chunk = tile_view(gm_beta[batch_idx, head_idx, None, None], (CHUNK_SIZE, 1), (chunk_idx, Int64(0)))
-        beta_write = self.ub_beta_raw.acquire()
-        mem_copy(beta_write, beta_chunk)
-        self.ub_beta_raw.commit(beta_write)
+        mem_copy(self.ub_beta_raw, beta_chunk)
         vec_sync_notify(PIPE.MTE2, PIPE.V, MTE2_TO_V_EVENT_ID)
         vec_sync_wait(PIPE.MTE2, PIPE.V, MTE2_TO_V_EVENT_ID)
-        beta_read = self.ub_beta_raw.wait()
         with vf(outputs=[self.ub_beta]):
-            cast(self.ub_beta, beta_read)
-        self.ub_beta_raw.release(beta_read)
+            cast(self.ub_beta, local_slice(self.ub_beta_raw, (CHUNK_SIZE, 1), offset=0))
         with vf(mode="raw"):
             lane_mask, _ = update_mask(VL, elem_bits=32)
             one = vdup_scalar(1.0, dtypes.float32, mask=lane_mask)
@@ -1041,13 +1006,11 @@ class StageOneVector:
                 t_true = vload(self.ub_kkt, row_off)
                 beta_brc = vload_brc(beta_slot, Int64(row_base) + row)        # β[row] 广播到整行(逐行标量)
                 t_beta = vmul(t_true, beta_brc, mask=row_mask)               # T[row,:] *= β[row]
-                # 严格下三角：全局行 i 保留前 i 列(对角也清)；update_mask(i) 的前 i 个 lane = 保留谓词。
                 tril_mask, _ = update_mask(Int64(row_base) + row, elem_bits=32)
                 t_tril = vselect_raw(t_beta, zero_reg, cond_mask=tril_mask)   # lane<i 取 t_beta，其余取 0
                 neg_t = vmuls(t_tril, -1.0, mask=row_mask)                    # -T
                 neg_t_fp16 = vcast(neg_t, dtypes.float16, mask=row_mask)            # f32 -> fp16
                 vstore_pack(self.ub_kkt_fp16, row_off, neg_t_fp16, row_mask, mode="b32_to_b16")
-        # nd2nz 拆到 raw 之外（skill 第4步；同 V pipe 程序序保 RaW）：ub_kkt_fp16(nd) -> ub_kkt_nz(nz)
         with vf(outputs=[self.ub_kkt_nz]):
             mem_copy(self.ub_kkt_nz, self.ub_kkt_fp16, engine=self.fp16_ub2l1)
         self._store_neumann_tmp_to_handoff_l1(power_handoff_l1, subblock_base)
@@ -1057,9 +1020,7 @@ class StageOneVector:
         """Construct the two C3 operands from one full S by D-half vector tile."""
         raw_k_snapshot = self.ub_raw_k[buffer_parity]
         v_half = tile_view(gm_V[batch_idx, head_idx, None, None], (CHUNK_SIZE, D_HALF), (chunk_idx, self.subblock_idx))
-        v_write = self.ub_v_raw.acquire()
-        self._copy_bf16_gm_half_tile_to_ub(v_half, v_write, cols=D_HALF)
-        self.ub_v_raw.commit(v_write)
+        self._copy_bf16_gm_half_tile_to_ub(v_half, self.ub_v_raw, cols=D_HALF)
         vec_sync_notify(PIPE.MTE2, PIPE.V, MTE2_TO_V_V_STAGING_EVENT_ID)
 
         cast_write = self.ub_cast_bf16
@@ -1081,16 +1042,14 @@ class StageOneVector:
         self._store_dhalf_nz_ub_to_full_l1(self.l1_K_decayed_beta_for_W, self.ub_bf16_nz)
 
         vec_sync_wait(PIPE.MTE2, PIPE.V, MTE2_TO_V_V_STAGING_EVENT_ID)
-        v_read = self.ub_v_raw.wait()
         cast_write = self.ub_cast_bf16
         with vf(mode="raw"):
             row_mask, _ = update_mask(VL, elem_bits=32)
             for row in dsl_range(Int64(0), Int64(CHUNK_SIZE), Int64(1), unroll=4):
                 offset = row * Int64(D_HALF)
                 beta = vload_brc(beta_slot, row)
-                v_value = vcast(vload_unpack(v_read, offset, mode=UnpackMode.B16_TO_B32), dtypes.float32, mask=row_mask)
+                v_value = vcast(vload_unpack(self.ub_v_raw, offset, mode=UnpackMode.B16_TO_B32), dtypes.float32, mask=row_mask)
                 vstore_pack(cast_write, offset, vcast(vmul(v_value, beta, mask=row_mask), dtypes.bfloat16, mask=row_mask), row_mask, mode="b32_to_b16")
-        self.ub_v_raw.release(v_read)
         cast_read = self.ub_cast_bf16
         with vf(outputs=[self.ub_bf16_nz]):
             mem_copy(self.ub_bf16_nz, cast_read, engine=self.ub2l1)
@@ -1409,7 +1368,6 @@ def _run_stage1_body(
             matmul.mm_per_d_kkt(3, 3)
             matmul.mm_per_d_mqk(3, 3)
 
-            vector.release_gate_cumsum(gate_cumsum_dhalf)
             vector.activate_raw_beta(gm_beta_brc, batch_index, value_head_index, chunk_index)
             matmul.finish_per_d_matrices(vector.ub_kkt, vector.ub_mqk)
 
@@ -1930,6 +1888,8 @@ class flash_kda_kernel:
 
 
 class FlashKDA:
+    """host 下发：head_dim / group 编译期常量经 self 携带，@jit run 建 kernel 并 op[block](...) 下发。"""
+
     def __init__(
         self,
         head_dim: int = SUPPORTED_HEAD_DIM,
@@ -2075,7 +2035,6 @@ def flash_kda(
     assert tuple(q.shape) == qk_shape and tuple(k.shape) == qk_shape, "q/k shape does not match layout"
     assert tuple(v.shape) == v_shape, "v shape does not match layout"
     assert tuple(g.shape) == v_shape, "g shape does not match layout"
-    # beta 对外接口是 3 维 BNS/BSN，校验也只按 3 维；末轴的 1 由内部补齐喂 kernel。
     assert beta.dim() == 3 and tuple(beta.shape) == beta_shape, "beta must be 3-D BNS/BSN matching layout"
     beta = beta.unsqueeze(-1)                    # 内部补 1 → BNS1/BSN1（kernel 期望 4 维）
     assert tuple(initial_state.shape) == (batch, n_v, dim, dim), "initial_state must be (B, Nv, D, D)"
@@ -2120,16 +2079,11 @@ def flash_kda(
         dtype=initial_state.dtype,
         device=initial_state.device,
     )
-    # group / dv_base 均按实际 bn 分桶（dv_base：少头切 Dv；group：少头用大 group 减 barrier），
-    # 一并作为下面动态 kernel 缓存的 key；B/S 仍动态复用（末尾 group 由 group_count 运行时夹取）。
+
     dv_base = int(os.environ.get("KDA_DV_BASE") or get_dv_base_config(bn_total, seq_len))
 
-    # min(S / CHUNK_SIZE, group) 不属于 Dim 表达式。按 min 的两个分支分别
-    # specialization，既保持 B/S 动态复用，也让 workspace 与输入关系精确可校验。
     scratch_uses_sequence = seq_len // CHUNK_SIZE <= group
-    # block_num 决定 launch grid，必须入 key，防止跨设备误复用。
-    # FlashKDA 恒 layout_qkv="BNSD"：BSND 由 host 转置 + _dynamic_sequence_tensor 的 stride 表达，
-    # 不走 run 内的 const_expr swap；fake 张量按实际 layout_qkv 编码 stride。
+
     block_num = _device_block_num(q)
     qk_exchange = allocate_qk_exchange_workspace(active_block_num=block_num, ref=q)
     _kernel_key = (
