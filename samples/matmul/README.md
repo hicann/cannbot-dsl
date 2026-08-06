@@ -59,4 +59,4 @@ pytest test/matmul/test_matmul.py -v
 
 基于 CANNBotDSL 实现的 matmul 算子与 CANN 包内置 matmul 算子基础模板在部分用例上的性能对比结果如下：
 
-![matmul_perf_compare](../../media/matmul.png)
+![matmul_perf_compare](../../figures/matmul.png)

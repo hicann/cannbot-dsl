@@ -59,4 +59,4 @@ pytest test/rms_norm/test_rms_norm.py -v
 
 基于cannbotdsl实现的RmsNorm算子与CANN内置RmsNorm算子在部分用例上的性能对比结果如下（所有数据均在同一台设备上通过msprof采集）：
 
-![rms_norm](../../media/rms_norm.png)
+![rms_norm](../../figures/rms_norm.png)

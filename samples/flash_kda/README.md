@@ -97,6 +97,6 @@ pytest -q test/flash_kda/test_flash_kda.py
 
 ## 性能对比
 
-![FlashKDA (DSL) 与 H800 性能对比](../../media/flash_kda.png)
+![FlashKDA (DSL) 与 H800 性能对比](../../figures/flash_kda.png)
 
 CANNBot-DSL 生成的 FlashKDA 代码与 H800 上的 FlashKDA 代码在 12 个典型配置上的平均延迟对比：`B=1`、`D=128`、`N=24/32/48`、`S=8K/16K/32K/64K`。

@@ -40,7 +40,7 @@
 │   ├── matmul/
 │   ├── pointnet_sa/
 │   └── rms_norm/
-├── media/
+├── figures/
 └── README.md
 ```
 
