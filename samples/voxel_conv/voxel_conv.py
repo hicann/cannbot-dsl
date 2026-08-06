@@ -148,7 +148,6 @@ class VoxelConvKernel:
             m_idx = rem2 // n_tiles
             n_idx = rem2 % n_tiles
 
-            l0c_slot = l0c.acquire()
             for ci_idx in range(Int64(ci_tiles)):
                 tile = self.spec.tile(
                     tile=self.tile_shape,
@@ -157,42 +156,18 @@ class VoxelConvKernel:
                     group=group,
                 )
 
-                fmap_slot = fmap_l1.acquire()
-                conv2d_load_fmap(fmap_slot, gm_x, tile)
-                fmap_l1.commit(fmap_slot)
+                conv2d_load_fmap(fmap_l1, gm_x, tile)
+                conv2d_load_filter(filter_l1, gm_filter, tile)
 
-                filter_slot = filter_l1.acquire()
-                conv2d_load_filter(filter_slot, gm_filter, tile)
-                filter_l1.commit(filter_slot)
+                conv2d_load_im2col(tile.l0a_view(l0a), fmap_l1, tile)
+                mem_copy(tile.l0b_view(l0b), tile.l1b_view(filter_l1))
 
-                fmap_ready = fmap_l1.wait()
-                l0a_slot = l0a.acquire()
-                conv2d_load_im2col(
-                    tile.l0a_view(l0a_slot), fmap_ready, tile
-                )
-                l0a.commit(l0a_slot)
-                fmap_l1.release(fmap_ready)
-
-                filter_ready = filter_l1.wait()
-                l0b_slot = l0b.acquire()
-                mem_copy(
-                    tile.l0b_view(l0b_slot),
-                    tile.l1b_view(filter_ready),
-                )
-                l0b.commit(l0b_slot)
-                filter_l1.release(filter_ready)
-
-                l0a_ready = l0a.wait()
-                l0b_ready = l0b.wait()
                 matmul(
-                    tile.l0c_view(l0c_slot),
-                    tile.l0a_view(l0a_ready),
-                    tile.l0b_view(l0b_ready),
+                    tile.l0c_view(l0c),
+                    tile.l0a_view(l0a),
+                    tile.l0b_view(l0b),
                     init=(ci_idx == 0),
                 )
-                l0a.release(l0a_ready)
-                l0b.release(l0b_ready)
-            l0c.commit(l0c_slot)
 
             output_tile = self.spec.tile(
                 tile=self.tile_shape,
@@ -200,13 +175,11 @@ class VoxelConvKernel:
                 batch=batch,
                 group=group,
             )
-            l0c_ready = l0c.wait()
             conv2d_store_output(
                 gm_y,
-                output_tile.l0c_view(l0c_ready),
+                output_tile.l0c_view(l0c),
                 output_tile,
             )
-            l0c.release(l0c_ready)
 
     @jit
     def run(self, gm_x: Tensor, gm_filter: Tensor, gm_y: Tensor):
