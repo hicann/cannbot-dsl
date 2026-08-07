@@ -1,6 +1,6 @@
 # FlashKDA
 
-基于 CANNBotDSL 的 Kimi Delta Attention prefill 融合算子，面向 Ascend 950。
+基于 CANNBot-DSL 的 Kimi Delta Attention prefill 融合算子，面向 Ascend 950。
 包括原始 gate 和 beta 的激活、Q/K 的 L2 normalize 以及完整的 Chunk KDA 计算。算子按 64-token chunk 计算，并在 chunk 间递推状态。实现位于 [`flash_kda.py`](flash_kda.py)。
 
 令 $\gamma_t=\exp(\sum_{i\le t}g_i)$，并定义：

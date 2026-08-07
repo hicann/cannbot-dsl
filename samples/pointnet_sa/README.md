@@ -1,6 +1,6 @@
 # PointNet Set Abstraction
 
-基于 cannbotdsl 实现的 PointNet++ Set Abstraction 层中的 shared MLP + max-pool 模块，支持 float16/bfloat16 数据类型，面向 Ascend NPU。
+基于 CANNBot-DSL 实现的 PointNet++ Set Abstraction 层中的 shared MLP + max-pool 模块，支持 float16/bfloat16 数据类型，面向 Ascend NPU。
 
 ## 背景
 
@@ -28,7 +28,7 @@ $$
 | 多核并行   | slide window 多核调度，与 matmul_basic 一致 |
 | 支持架构   | NPU ARCH 3510（Ascend 950DT / Ascend 950PR） |
 
-shared MLP 的 matmul 部分使用 cannbotdsl 的 Channel + matmul 实现，数据流为 GM -> L1（MTE2, nd2nz）-> L0A/L0B（MTE1）-> L0C（M, MMAD）-> GM（FIXPIPE）。max-pooling 聚合由 torch NPU 原生算子完成。
+shared MLP 的 matmul 部分使用 CANNBot-DSL 的 Channel + matmul 实现，数据流为 GM -> L1（MTE2, nd2nz）-> L0A/L0B（MTE1）-> L0C（M, MMAD）-> GM（FIXPIPE）。max-pooling 聚合由 torch NPU 原生算子完成。
 
 实现详见 `pointnet_sa.py`。
 

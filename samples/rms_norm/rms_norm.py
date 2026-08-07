@@ -10,6 +10,7 @@ import math
 
 import torch
 
+import cannbotdsl
 from cannbotdsl import dtypes
 from cannbotdsl.buffer import Buffer
 from cannbotdsl.jit_runner import jit
@@ -33,6 +34,7 @@ VL = 64
 DEFAULT_BLOCK_NUM = 64
 FULL_LOAD_R_MAX = 16384
 COL_TILE_CAP = 4096
+COL_TILE_CAP_LARGE = 8192
 DICHOTOMY_ADD_COEFF = 2
 RETAINED_SIZE_1K = 2 * 1024
 DOUBLE_BUFFER_NUM = 2
@@ -71,6 +73,13 @@ class RowFullLoadKernel:
         self._fp = _find_power_two(self._nca)
         fold_loops = math.ceil(self._fp / VL)
         self._tmp_stride = math.ceil(fold_loops / 8) * 8
+        elem_bytes = 2 if self._x_is_16bit else 4
+        gamma_bytes = self._w * (elem_bytes + FLOAT_BYTE_SIZE) if self._x_is_16bit else self._w * FLOAT_BYTE_SIZE
+        self._depth = DOUBLE_BUFFER_NUM
+        for d in (DOUBLE_BUFFER_NUM, 1):
+            if RETAINED_SIZE_1K + gamma_bytes + self._w * elem_bytes * MULTI_FACTOR_2 * d + FLOAT_BYTE_SIZE * (d + X_REDUCE_TMP_NUM) + max(self._tmp_stride, VL) * FLOAT_BYTE_SIZE <= UB_SIZE:
+                self._depth = d
+                break
         buf_dtype = dtype if self._x_is_16bit else dtypes.float32
         if self._x_is_16bit:
             self._gamma_16_ch = Channel(MemLoc.UB, shape=(1, self._w), dtype=dtype, depth=1)
@@ -79,9 +88,9 @@ class RowFullLoadKernel:
             self._gamma_fp32 = Channel(
                 MemLoc.UB, shape=(1, self._w), dtype=dtypes.float32, depth=1,
             )
-        self._x_ch = Channel(MemLoc.UB, shape=(1, self._w), dtype=buf_dtype, depth=2)
-        self._y_ch = Channel(MemLoc.UB, shape=(1, self._w), dtype=buf_dtype, depth=2)
-        self._rstd_ch = Channel(MemLoc.UB, shape=(1, VL), dtype=dtypes.float32, depth=2)
+        self._x_ch = Channel(MemLoc.UB, shape=(1, self._w), dtype=buf_dtype, depth=self._depth)
+        self._y_ch = Channel(MemLoc.UB, shape=(1, self._w), dtype=buf_dtype, depth=self._depth)
+        self._rstd_ch = Channel(MemLoc.UB, shape=(1, VL), dtype=dtypes.float32, depth=self._depth)
         self._tmp = Buffer(MemLoc.UB, (1, max(self._tmp_stride, VL)), dtypes.float32)
         self._reduce = Buffer(MemLoc.UB, (1, VL), dtypes.float32)
 
@@ -102,11 +111,15 @@ class RowFullLoadKernel:
 
         if bi < lcn:
             gamma_view = self._load_gamma(gm_gamma)
-            mem_copy(self._x_ch, tile_view(gm_x, (1, num_col), (rs, 0)))
+            if self._depth == 2:
+                mem_copy(self._x_ch, tile_view(gm_x, (1, num_col), (rs, 0)))
             for row in range(rs, re):
-                nxt = row + 1
-                if nxt < re:
-                    mem_copy(self._x_ch, tile_view(gm_x, (1, num_col), (nxt, 0)))
+                if self._depth == 1:
+                    mem_copy(self._x_ch, tile_view(gm_x, (1, num_col), (row, 0)))
+                else:
+                    nxt = row + 1
+                    if nxt < re:
+                        mem_copy(self._x_ch, tile_view(gm_x, (1, num_col), (nxt, 0)))
                 self._compute(
                     gamma_view, avg, epsilon,
                 )
@@ -124,10 +137,12 @@ class RowFullLoadKernel:
         reduce_tmp = self._reduce
         nca = self._nca
         fp = self._fp
+        num_col = self._num_col
         is_16bit = self._x_is_16bit
         out_dtype = self._dtype
         with vf(mode="raw"):
             full = full_mask(32)
+            zero = vdup_scalar(0.0, dtypes.float32, mask=full)
             fold_loops = math.ceil(fp / VL)
             last_num = fp // VL
             tail = nca - fp if nca > fp else 0
@@ -142,9 +157,13 @@ class RowFullLoadKernel:
                     xu1 = vload_unpack(x_buf, off + fp, mode=UnpackMode.B16_TO_B32)
                     x0 = vcast(xu0, dtypes.float32, mask=full)
                     x1 = vcast(xu1, dtypes.float32, mask=full)
+                    x0 = vselect(x0, zero, cond_mask=update_mask(num_col - off, elem_bits=32)[0])
+                    x1 = vselect(x1, zero, cond_mask=update_mask(num_col - off - fp, elem_bits=32)[0])
                 else:
                     x0 = vload(x_buf, off)
+                    x0 = vselect(x0, zero, cond_mask=update_mask(num_col - off, elem_bits=32)[0])
                     x1 = vload(x_buf, off + fp)
+                    x1 = vselect(x1, zero, cond_mask=update_mask(num_col - off - fp, elem_bits=32)[0])
                 x0 = vmul(x0, x0, mask=full)
                 x1 = vmul(x1, x1, mask=full)
                 s = vadd(x0, x1, mask=full)
@@ -158,9 +177,13 @@ class RowFullLoadKernel:
                     xu1 = vload_unpack(x_buf, off + fp, mode=UnpackMode.B16_TO_B32)
                     x0 = vcast(xu0, dtypes.float32, mask=full)
                     x1 = vcast(xu1, dtypes.float32, mask=preg_t)
+                    x0 = vselect(x0, zero, cond_mask=update_mask(num_col - off, elem_bits=32)[0])
+                    x1 = vselect(x1, zero, cond_mask=update_mask(num_col - off - fp, elem_bits=32)[0])
                 else:
                     x0 = vload(x_buf, off)
+                    x0 = vselect(x0, zero, cond_mask=update_mask(num_col - off, elem_bits=32)[0])
                     x1 = vload(x_buf, off + fp)
+                    x1 = vselect(x1, zero, cond_mask=update_mask(num_col - off - fp, elem_bits=32)[0])
                 x0 = vmul(x0, x0, mask=full)
                 x1 = vmul(x1, x1, mask=preg_t)
                 x1 = vselect(x1, vdup_scalar(0.0, dtypes.float32, mask=full), cond_mask=preg_t)
@@ -171,8 +194,10 @@ class RowFullLoadKernel:
                 if const_expr(is_16bit):
                     xu = vload_unpack(x_buf, off, mode=UnpackMode.B16_TO_B32)
                     x0 = vcast(xu, dtypes.float32, mask=full)
+                    x0 = vselect(x0, zero, cond_mask=update_mask(num_col - off, elem_bits=32)[0])
                 else:
                     x0 = vload(x_buf, off)
+                    x0 = vselect(x0, zero, cond_mask=update_mask(num_col - off, elem_bits=32)[0])
                 x0 = vmul(x0, x0, mask=full)
                 vstore_first(tmp_buf, r, vreduce_sum(x0, mask=full))
             vmem_bar(mode="vst_vld")
@@ -216,15 +241,17 @@ class RowFullLoadKernel:
             # --- Phase 3: y = x * rstd * gamma ---
             col_loops = math.ceil(nca / VL)
             for j in range(col_loops):
-                preg = update_mask(nca - j * VL, elem_bits=32)[0]
+                preg = update_mask(num_col - j * VL, elem_bits=32)[0]
                 off = j * VL
                 if const_expr(is_16bit):
                     xu = vload_unpack(x_buf, off, mode=UnpackMode.B16_TO_B32)
                     x = vcast(xu, dtypes.float32, mask=preg)
                 else:
                     x = vload(x_buf, off)
+                    x = vselect(x, zero, cond_mask=preg)
                 mul1 = vmul(x, rstd_brc, mask=preg)
                 g = vload(gamma_fp32, off)
+                g = vselect(g, zero, cond_mask=preg)
                 yval = vmul(mul1, g, mask=preg)
                 if const_expr(is_16bit):
                     vstore_pack(y_buf, off, vcast(yval, out_dtype, mask=preg), preg, mode=PackMode.B32_TO_B16)
@@ -253,18 +280,25 @@ class ColSplitKernel:
         self._dtype = dtype
         self._x_is_16bit = dtype in (dtypes.bfloat16, dtypes.float16)
         num_col_int = self._num_col
-        if num_col_int <= COL_TILE_CAP:
-            self._col_tile = num_col_int
-        else:
-            tile = 1
-            for d in range(COL_TILE_CAP, 0, -1):
-                if num_col_int % d == 0:
-                    tile = d
-                    break
-            self._col_tile = tile
-        self._num_tiles = self._num_col // self._col_tile
-        self._num_seg = math.ceil(self._col_tile / VL)
-        self._w = self._num_seg * VL
+        elem_bytes = 2 if self._x_is_16bit else 4
+        for cap in (COL_TILE_CAP_LARGE, COL_TILE_CAP):
+            if num_col_int <= cap:
+                self._col_tile = num_col_int
+            else:
+                tile = 1
+                for d in range(cap, 0, -1):
+                    if num_col_int % d == 0:
+                        tile = d
+                        break
+                self._col_tile = tile
+            self._num_tiles = self._num_col // self._col_tile
+            self._num_seg = math.ceil(self._col_tile / VL)
+            self._w = self._num_seg * VL
+            w = self._w
+            nt = self._num_tiles
+            ub_need = RETAINED_SIZE_1K + w * elem_bytes * 4 + w * elem_bytes + w * 4 + VL * 4 + math.ceil(nt / VL) * VL * 4
+            if ub_need <= UB_SIZE:
+                break
         self._tile_squared_sum_width = math.ceil(self._num_tiles / VL) * VL
         buf_dtype = dtype if self._x_is_16bit else dtypes.float32
         if self._x_is_16bit:
@@ -279,7 +313,6 @@ class ColSplitKernel:
         self._rstd_ch = Channel(MemLoc.UB, shape=(1, VL), dtype=dtypes.float32, depth=1)
         self._rstd_gm_ch = Channel(MemLoc.UB, shape=(1, 1), dtype=dtypes.float32, depth=1)
         self._tile_squared_sum_buffer = Buffer(MemLoc.UB, (1, self._tile_squared_sum_width), dtypes.float32)
-        self._tmp = Buffer(MemLoc.UB, (1, VL), dtypes.float32)
         self._x_db_ch = Channel(MemLoc.UB, shape=(1, self._w), dtype=buf_dtype, depth=2)
         self._x_ch = Channel(MemLoc.UB, shape=(1, self._w), dtype=buf_dtype, depth=2)
         self._y_ch = Channel(MemLoc.UB, shape=(1, self._w), dtype=buf_dtype, depth=1)
@@ -310,7 +343,7 @@ class ColSplitKernel:
                     if nxt < nt:
                         mem_copy(self._x_db_ch, tile_view(gm_x, (1, ct), (row, nxt)))
                     self._compute_x_squared_sum(
-                        self._x_db_ch, self._tile_squared_sum_buffer, t, self._tmp,
+                        self._x_db_ch, self._tile_squared_sum_buffer, t,
                     )
 
                 self._compute_rstd(
@@ -347,8 +380,10 @@ class ColSplitKernel:
     @jit
     def _compute_y(self, x_buf, gamma_fp32, y_buf, rstd_ub):
         with vf(mode="raw"):
+            full = full_mask(32)
+            zero = vdup_scalar(0.0, dtypes.float32, mask=full)
             rstd_brc = vload_brc(rstd_ub, 0)
-            for seg in range(0, self._num_seg):
+            for seg in cannbotdsl.range(self._num_seg, unroll=2):
                 mask, _ = update_mask(self._col_tile - seg * VL, elem_bits=32)
                 off = seg * VL
                 if const_expr(self._x_is_16bit):
@@ -356,7 +391,9 @@ class ColSplitKernel:
                     xf = vcast(xu, dtypes.float32, mask=mask)
                 else:
                     xf = vload(x_buf, off)
+                    xf = vselect(xf, zero, cond_mask=mask)
                 gf = vload(gamma_fp32, off)
+                gf = vselect(gf, zero, cond_mask=mask)
                 yr = vmul(xf, rstd_brc, mask=mask)
                 yval = vmul(yr, gf, mask=mask)
                 if const_expr(self._x_is_16bit):
@@ -365,96 +402,24 @@ class ColSplitKernel:
                     vstore(y_buf, off, yval, mask)
 
     @jit
-    def _compute_x_squared_sum(self, x_buf, tile_squared_sum_buffer, t, tmp_buf):
-        w = self._num_seg * VL
-        power_split = _find_power_two(w)
-        remain_tile = w - power_split
-        remain_full = remain_tile // (2 * VL)
-        remain_tail = remain_tile - remain_full * (2 * VL)
-        master_tile = power_split - remain_tile
-        master_full = master_tile // (2 * VL)
-        master_tail = master_tile - master_full * (2 * VL)
-        work_count = remain_full + master_full + (1 if remain_tail > 0 else 0) + (1 if master_tail > 0 else 0)
+    def _compute_x_squared_sum(self, x_buf, tile_squared_sum_buffer, t):
         with vf(mode="raw"):
             full = full_mask(32)
-            for i in range(0, remain_full):
-                preg = update_mask(remain_tile, elem_bits=32)[0]
-                o1 = (i * 2 + 0) * VL
-                o2 = (i * 2 + 1) * VL
+            zero = vdup_scalar(0.0, dtypes.float32, mask=full)
+            ct = self._col_tile
+            acc = vdup_scalar(0.0, dtypes.float32, mask=full)
+            for seg in range(0, self._num_seg):
+                mask, _ = update_mask(ct - seg * VL, elem_bits=32)
+                off = seg * VL
                 if const_expr(self._x_is_16bit):
-                    mua = vload_unpack(x_buf, o1, mode=UnpackMode.B16_TO_B32)
-                    mub = vload_unpack(x_buf, o2, mode=UnpackMode.B16_TO_B32)
-                    tua = vload_unpack(x_buf, power_split + o1, mode=UnpackMode.B16_TO_B32)
-                    tub = vload_unpack(x_buf, power_split + o2, mode=UnpackMode.B16_TO_B32)
-                    ma = vcast(mua, dtypes.float32, mask=preg)
-                    mb = vcast(mub, dtypes.float32, mask=preg)
-                    ta = vcast(tua, dtypes.float32, mask=preg)
-                    tb = vcast(tub, dtypes.float32, mask=preg)
+                    xu = vload_unpack(x_buf, off, mode=UnpackMode.B16_TO_B32)
+                    xf = vcast(xu, dtypes.float32, mask=mask)
                 else:
-                    ma = vload(x_buf, o1)
-                    mb = vload(x_buf, o2)
-                    ta = vload(x_buf, power_split + o1)
-                    tb = vload(x_buf, power_split + o2)
-                ma = vmul(ma, ma, mask=preg)
-                mb = vmul(mb, mb, mask=preg)
-                ta = vmul(ta, ta, mask=preg)
-                tb = vmul(tb, tb, mask=preg)
-                ma = vadd(ma, ta, mask=preg)
-                mb = vadd(mb, tb, mask=preg)
-                ma = vadd(ma, mb, mask=preg)
-                vstore_first(tmp_buf, i, vreduce_sum(ma, mask=preg))
-            for i in range(0, master_full):
-                preg = update_mask(master_tile, elem_bits=32)[0]
-                o1 = (i * 2 + 0) * VL
-                o2 = (i * 2 + 1) * VL
-                if const_expr(self._x_is_16bit):
-                    mua = vload_unpack(x_buf, remain_tile + o1, mode=UnpackMode.B16_TO_B32)
-                    mub = vload_unpack(x_buf, remain_tile + o2, mode=UnpackMode.B16_TO_B32)
-                    ma = vcast(mua, dtypes.float32, mask=preg)
-                    mb = vcast(mub, dtypes.float32, mask=preg)
-                else:
-                    ma = vload(x_buf, remain_tile + o1)
-                    mb = vload(x_buf, remain_tile + o2)
-                ma = vmul(ma, ma, mask=preg)
-                mb = vmul(mb, mb, mask=preg)
-                ma = vadd(ma, mb, mask=preg)
-                vstore_first(tmp_buf, remain_full + i, vreduce_sum(ma, mask=preg))
-            if remain_tail > 0:
-                off = remain_full * (2 * VL)
-                acc = vdup_scalar(0.0, dtypes.float32, mask=full)
-                segs = math.ceil(remain_tail / VL)
-                for seg in range(0, segs):
-                    preg = update_mask(remain_tail - seg * VL, elem_bits=32)[0]
-                    if const_expr(self._x_is_16bit):
-                        xu = vload_unpack(x_buf, off + seg * VL, mode=UnpackMode.B16_TO_B32)
-                        xf = vcast(xu, dtypes.float32, mask=preg)
-                        tu = vload_unpack(x_buf, power_split + off + seg * VL, mode=UnpackMode.B16_TO_B32)
-                        tf = vcast(tu, dtypes.float32, mask=preg)
-                    else:
-                        xf = vload(x_buf, off + seg * VL)
-                        tf = vload(x_buf, power_split + off + seg * VL)
-                    xf = vmul(xf, xf, mask=preg)
-                    tf = vmul(tf, tf, mask=preg)
-                    acc = vadd(acc, vadd(xf, tf, mask=preg), mask=full)
-                vstore_first(tmp_buf, remain_full + master_full, vreduce_sum(acc, mask=full))
-            if master_tail > 0:
-                off = master_full * (2 * VL)
-                acc = vdup_scalar(0.0, dtypes.float32, mask=full)
-                segs = math.ceil(master_tail / VL)
-                for seg in range(0, segs):
-                    preg = update_mask(master_tail - seg * VL, elem_bits=32)[0]
-                    if const_expr(self._x_is_16bit):
-                        xu = vload_unpack(x_buf, remain_tile + off + seg * VL, mode=UnpackMode.B16_TO_B32)
-                        xf = vcast(xu, dtypes.float32, mask=preg)
-                    else:
-                        xf = vload(x_buf, remain_tile + off + seg * VL)
-                    xf = vmul(xf, xf, mask=preg)
-                    acc = vadd(acc, xf, mask=full)
-                vstore_first(tmp_buf, remain_full + master_full + (1 if remain_tail > 0 else 0), vreduce_sum(acc, mask=full))
-            vmem_bar(mode="vst_vld")
-            preg = update_mask(work_count, elem_bits=32)[0]
-            a = vload(tmp_buf, 0)
-            vstore_first(tile_squared_sum_buffer, t, vreduce_sum(a, mask=preg))
+                    xf = vload(x_buf, off)
+                    xf = vselect(xf, zero, cond_mask=mask)
+                xf = vmul(xf, xf, mask=mask)
+                acc = vadd(acc, vreduce_sum(xf, mask=mask), mask=full)
+            vstore_first(tile_squared_sum_buffer, t, acc)
 
     @jit
     def _compute_rstd(self, tile_squared_sum_buffer, rstd_ub, rstd_gm, avg, epsilon):
@@ -501,12 +466,15 @@ class RmsNorm:
         is_16bit = dtype in (dtypes.bfloat16, dtypes.float16)
         elem_bytes = 2 if is_16bit else 4
         gamma_bytes = nca * (elem_bytes + FLOAT_BYTE_SIZE) if is_16bit else nca * FLOAT_BYTE_SIZE
-        power_factor = 2 ** int(math.floor(math.log2(max(nca - 1, 1)))) if nca > 1 else 1
-        first_vcadd_length = math.ceil(math.ceil(power_factor / VL) / 8) * 8
-        ub_factor = (UB_SIZE - RETAINED_SIZE_1K - gamma_bytes) / \
-                    (nca * elem_bytes * MULTI_FACTOR_2 * DOUBLE_BUFFER_NUM +
-                     FLOAT_BYTE_SIZE * (DOUBLE_BUFFER_NUM + X_REDUCE_TMP_NUM) + first_vcadd_length * FLOAT_BYTE_SIZE)
-        return ub_factor >= 1 and nca <= FULL_LOAD_R_MAX
+        if nca > FULL_LOAD_R_MAX:
+            return False
+        for depth in (DOUBLE_BUFFER_NUM, 1):
+            ub_factor = (UB_SIZE - RETAINED_SIZE_1K - gamma_bytes) / \
+                        (nca * elem_bytes * MULTI_FACTOR_2 * depth +
+                         FLOAT_BYTE_SIZE * (depth + X_REDUCE_TMP_NUM))
+            if ub_factor >= 1:
+                return True
+        return False
 
     @jit
     def run(self, gm_x, gm_gamma, gm_y, gm_rstd, eps: dtypes.float32):

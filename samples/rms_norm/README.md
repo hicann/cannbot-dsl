@@ -1,6 +1,6 @@
 # RmsNorm
 
-基于cannbotdsl实现的RmsNorm归一化算子，支持bfloat16、float16、float32数据类型，面向Ascend NPU。
+基于CANNBot-DSL实现的RmsNorm归一化算子，支持bfloat16、float16、float32数据类型，面向Ascend NPU。
 
 ## 算子介绍
 
@@ -57,6 +57,6 @@ pytest test/rms_norm/test_rms_norm.py -v
 
 ## 性能数据
 
-基于cannbotdsl实现的RmsNorm算子与CANN内置RmsNorm算子在部分用例上的性能对比结果如下（所有数据均在同一台设备上通过msprof采集）：
+该算子由CANNBot+CANNBot-DSL在1天内自动生成并完成调优。以下为CANNBot-DSL实现与CANN BuiltIn实现在部分用例上的性能对比结果：
 
 ![rms_norm](../../figures/rms_norm.png)

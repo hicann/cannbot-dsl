@@ -1,6 +1,6 @@
 # Matmul
 
-基于 cannbotdsl 实现的非量化矩阵乘算子，支持 float16、bfloat16 数据类型，面向 Ascend NPU。
+基于 CANNBot-DSL 实现的非量化矩阵乘算子，支持 float16、bfloat16 数据类型，面向 Ascend NPU。
 
 ## 算子介绍
 
@@ -57,6 +57,6 @@ pytest test/matmul/test_matmul.py -v
 
 ## 性能数据
 
-基于 CANNBotDSL 实现的 matmul 算子与 CANN 包内置 matmul 算子基础模板在部分用例上的性能对比结果如下：
+基于 CANNBot-DSL 实现的 matmul 算子与 CANN 包内置 matmul 算子基础模板在部分用例上的性能对比结果如下：
 
 ![matmul_perf_compare](../../figures/matmul.png)

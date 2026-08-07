@@ -84,4 +84,4 @@ pytest test/flash_attn/test_flash_attn.py -v
 
 ![FlashAttn vs FIA 性能对比](../../figures/flash_attn.png)
 
-FlashAttn (CANNBotDSL) 与 FIA (CANN built-in) 在 12 个典型 case 上的性能对比（msprof 采集，按 FlashAttn 耗时升序排列）。
+FlashAttn (CANNBot-DSL) 与 FIA (CANN BuiltIn) 在 12 个典型 case 上的性能对比（msprof 采集，按 FlashAttn 耗时升序排列）。
