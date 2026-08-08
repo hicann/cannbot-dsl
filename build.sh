@@ -28,10 +28,14 @@ BASE="origin/master"
 CHANGED_LIST=""
 
 # 自动激活 conda 环境（self-hosted runner 为独立进程，默认不激活 conda）。
-# 目标环境名可用 CANNBOT_CONDA_ENV 覆盖；置空或设 CANNBOT_NO_CONDA=1 可禁用。
+# CANNBOT_CONDA_ENV 指定环境名；CANNBOT_CONDA_BASE 显式指定 conda 安装路径
+# （root 运行下 PATH 无 conda 时必需）；置空或设 CANNBOT_NO_CONDA=1 可禁用。
 CANNBOT_CONDA_ENV="${CANNBOT_CONDA_ENV:-cannbot}"
-if [[ "${CANNBOT_NO_CONDA:-0}" != "1" && -n "$CANNBOT_CONDA_ENV" ]] && command -v conda >/dev/null 2>&1; then
-    CONDA_BASE="$(conda info --base 2>/dev/null)"
+if [[ "${CANNBOT_NO_CONDA:-0}" != "1" && -n "$CANNBOT_CONDA_ENV" ]]; then
+    CONDA_BASE="${CANNBOT_CONDA_BASE:-}"
+    if [[ -z "$CONDA_BASE" ]] && command -v conda >/dev/null 2>&1; then
+        CONDA_BASE="$(conda info --base 2>/dev/null)"
+    fi
     if [[ -n "$CONDA_BASE" && -f "$CONDA_BASE/etc/profile.d/conda.sh" ]]; then
         # shellcheck disable=SC1090
         source "$CONDA_BASE/etc/profile.d/conda.sh"
