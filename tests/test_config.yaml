@@ -1,0 +1,83 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+# test_config.yaml
+#
+# 用来配置 CI 如何根据文件变更列表触发相应的验证。
+# 规则以结点为最小单位，结点通过 module: True 标识，解析器（scripts/ci/parse_changed_ops.py）
+# 递归遍历配置树，命中 module 结点后读取其 src 与 options。
+#
+# 字段说明：
+#   module: True ------------- 固定写法，标识此处为一个结点
+#   src: --------------------- [可选] 看护的源码/测试路径列表，其中任一文件被修改时触发
+#   options: ----------------- [可选] 命中结点后需要验证的算子列表；all 表示运行全部算子
+#
+# 匹配规则：变更文件路径以某个 src 为前缀（或等于 src）即命中该结点。
+# 公共文件（conftest.py、scripts、依赖清单等）改动会触发 all，即全量验证。
+
+voxel_conv:
+  module: True
+  src:
+    - samples/voxel_conv
+    - test/voxel_conv
+  options:
+    - voxel_conv
+
+flash_attn:
+  module: True
+  src:
+    - samples/flash_attn
+    - test/flash_attn
+  options:
+    - flash_attn
+
+flash_kda:
+  module: True
+  src:
+    - samples/flash_kda
+    - test/flash_kda
+  options:
+    - flash_kda
+
+matmul:
+  module: True
+  src:
+    - samples/matmul
+    - test/matmul
+  options:
+    - matmul
+
+pointnet_sa:
+  module: True
+  src:
+    - samples/pointnet_sa
+    - test/pointnet_sa
+  options:
+    - pointnet_sa
+
+rms_norm:
+  module: True
+  src:
+    - samples/rms_norm
+    - test/rms_norm
+  options:
+    - rms_norm
+
+shared:
+  module: True
+  src:
+    - build.sh
+    - install_deps.sh
+    - test/conftest.py
+    - scripts
+    - tests
+    - requirements.txt
+    - .pre-commit-config.yaml
+  options:
+    - all

@@ -1,0 +1,38 @@
+name: test_action
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        required: true
+        type: string
+
+jobs:
+  JOB_test:
+    name: Test
+    steps:
+      -
+        name: Checkout
+        identifier: process_checkout
+        uses: checkout
+        with:
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha }}
+          token: ${{ secrets.GIT_TOKEN }}
+      -
+        name: download_pr_filelist
+        uses: obs-download
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          key: ${{ env.obs_path }}/pr_filelist.txt
+          path: ${{ steps.process_checkout.outputs.path }}
+      -
+        name: run_tests
+        identifier: run_tests
+        run: |
+          cd ${{ steps.process_checkout.outputs.path }}
+          bash build.sh --mode=${{ inputs.mode }} --changed-list=pr_filelist.txt
+    if: "${{ default() }}"
+    runs-on: [self-hosted, dsl_runner]

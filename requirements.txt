@@ -1,0 +1,12 @@
+# 依赖清单（供 install_deps.sh 校验与平台预置环境参考）。
+# 注意：cannbotdsl / torch / torch_npu 不在 pip 镜像上，需从本机本地 wheel 安装：
+#   cannbotdsl: /opt/cannbot-dsl/whl/<build_time>/cannbotdsl-*.whl
+#   torch:      /opt/cannbot-dsl/cann/torch-*.whl
+#   torch_npu:  /opt/cannbot-dsl/cann/torch_npu-*.whl
+cannbotdsl
+torch
+torch_npu
+numpy
+ml_dtypes
+pytest
+PyYAML

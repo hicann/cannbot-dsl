@@ -62,10 +62,26 @@ stages:
     pre:
     - type: auto
     fail-fast: false
-  
+  stage3:
+    name: test
+    jobs:
+      JOB_test_cpu:
+        name: Test_cpu
+        uses: .gitcode/workflows/test_action.yml
+        with:
+          mode: cpu
+      JOB_test_npu:
+        name: Test_npu
+        uses: .gitcode/workflows/test_action.yml
+        with:
+          mode: npu
+    pre:
+    - type: auto
+    fail-fast: false
+
 
 post:
-  jobs: 
-    job_post: 
+  jobs:
+    job_post:
       name: Test_post
       uses: cann/.gitcode/.gitcode/workflows/post_action.yml@master
