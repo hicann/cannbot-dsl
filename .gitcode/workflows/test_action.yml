@@ -35,4 +35,4 @@ jobs:
           cd ${{ steps.process_checkout.outputs.path }}
           bash build.sh --mode=${{ inputs.mode }} --changed-list=pr_filelist.txt
     if: "${{ default() }}"
-    runs-on: [self-hosted, dsl_runner, os=ubuntu, evb=a5, repo=dsl]
+    runs-on: ['self-hosted', 'os=ubuntu', 'evb=a5', 'repo=dsl']
