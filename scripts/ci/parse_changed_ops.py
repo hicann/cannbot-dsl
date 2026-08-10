@@ -16,7 +16,7 @@ this script to decide which operators must be compiled/tested.
 
 Usage:
     python3 scripts/ci/parse_changed_ops.py <changed_list> \
-        [--config tests/test_config.yaml] [--op-list scripts/ci/operator_list.yaml]
+        [--config test/test_config.yaml] [--op-list scripts/ci/operator_list.yaml]
 
 Input format of <changed_list> (one file per line):
     samples/matmul/matmul.py            (git diff --name-only)
@@ -153,8 +153,8 @@ def main():
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("tests/test_config.yaml"),
-        help="rule file (tests/test_config.yaml)",
+        default=Path("test/test_config.yaml"),
+        help="rule file (test/test_config.yaml)",
     )
     parser.add_argument(
         "--op-list",
