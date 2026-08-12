@@ -13,14 +13,13 @@ import torch
 import cannbotdsl
 from cannbotdsl import dtypes
 from cannbotdsl.buffer import Buffer
-from cannbotdsl.jit_runner import jit
+from cannbotdsl.jit_function import jit
 from cannbotdsl.kernel_launcher import kernel
-from cannbotdsl.runtime import from_torch_npu
 from cannbotdsl.arch import get_block_idx, get_block_num
 from cannbotdsl.channel import Channel
 from cannbotdsl.constexpr import const_expr
 from cannbotdsl.tensor import local_slice, tile_view, mem_copy
-from cannbotdsl.typing.types import MemLoc, Tensor
+from cannbotdsl.types import MemLoc, Tensor
 from cannbotdsl.vf import vf
 from cannbotdsl.raw_reg import (
     PackMode, UnpackMode, full_mask, update_mask,
@@ -513,6 +512,5 @@ def rms_norm(x, gamma, *, epsilon=1e-6):
     rstd2d = rstd.reshape(num_row, 1)
 
     op = RmsNorm(dtype=_TORCH_TO_DSL[x.dtype])
-    op.run(from_torch_npu(x2d), from_torch_npu(gamma2d), from_torch_npu(y2d),
-           from_torch_npu(rstd2d), float(epsilon))
+    op.run(x2d, gamma2d, y2d, rstd2d, float(epsilon))
     return out, rstd
