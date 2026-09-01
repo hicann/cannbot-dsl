@@ -76,7 +76,7 @@ shared:
     - install_deps.sh
     - test/conftest.py
     - scripts
-    - tests
+    - test
     - requirements.txt
     - .pre-commit-config.yaml
   options:
