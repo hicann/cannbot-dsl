@@ -9,11 +9,9 @@ import dataclasses
 import os
 from typing import NamedTuple, Optional, Tuple
 
-os.environ.setdefault("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
-
-_RAW_K_FORMAT = "bf16"
 import cannbotdsl
 import torch
+from torch import as_tensor as from_torch_npu
 from cannbotdsl import dtypes
 from cannbotdsl.arch import get_block_idx, get_block_num, get_subblock_id
 from cannbotdsl.buffer import Buffer
@@ -56,7 +54,6 @@ from cannbotdsl.raw_reg import (
     vsqrt,
 )
 from cannbotdsl.raw_reg import vselect as vselect_raw
-from cannbotdsl.runtime import from_torch_npu
 from cannbotdsl.sync import (
     cube_fill_l1_zero,
     cube_raw_l1_to_l0a,
@@ -83,6 +80,9 @@ from cannbotdsl.tensor import (
 )
 from cannbotdsl.typing.types import ChannelKind, MemLoc, PIPE, Tensor
 from cannbotdsl.vf import vf
+
+os.environ.setdefault("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
+_RAW_K_FORMAT = "bf16"
 
 CHUNK_SIZE = 64
 SUPPORTED_HEAD_DIM = 128

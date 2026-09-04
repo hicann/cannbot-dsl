@@ -22,6 +22,7 @@ source_cann_env() {
     local candidates=(
         "${ASCEND_TOOLKIT_HOME:-}/set_env.sh"
         "$HOME/Ascend/ascend-toolkit/set_env.sh"
+        "/usr/local/Ascend/cann-9.2.0/set_env.sh"
         "/usr/local/Ascend/ascend-toolkit/set_env.sh"
     )
     for env_sh in "${candidates[@]}"; do
@@ -37,6 +38,11 @@ source_cann_env() {
 }
 
 source_cann_env
+
+# torch 2.12 auto-loads torch_npu through an entry point.  Loading it before
+# CANN is initialized can fail on libhccl, and repeated collection can register
+# the same torch library twice.  NPU tests import torch_npu explicitly later.
+export TORCH_DEVICE_BACKEND_AUTOLOAD="${TORCH_DEVICE_BACKEND_AUTOLOAD:-0}"
 
 usage() {
     cat <<EOF

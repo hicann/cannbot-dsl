@@ -9,7 +9,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-# 环境校验脚本：只检查依赖是否齐全，不执行安装。
+# 环境校验脚本：只从本地 wheel 修复依赖，不访问 pip 镜像。
 # cannbotdsl / torch / torch_npu 不在 pip 镜像上，由平台/CI 预置环境按本地 wheel 安装
 # （参考目录：cannbotdsl -> /opt/cannbot-dsl/whl，torch(_npu) -> /opt/cannbot-dsl/cann）。
 
@@ -17,12 +17,19 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="${PYTHON:-python3}"
+CANNBOTDSL_WHEEL_ROOT="${CANNBOTDSL_WHEEL_ROOT:-/opt/cannbot-dsl}"
+CANNBOTDSL_WHEEL_ROOTS=(
+    "$CANNBOTDSL_WHEEL_ROOT"
+    "${HOME:-}/.cache/cannbot-bootstrap"
+    "/home/l00940154/.cache/cannbot-bootstrap"
+)
 
 # 1. 可选地加载 CANN 环境（torch_npu 依赖 libhccl 等动态库）
 source_cann_env() {
     local candidates=(
         "${ASCEND_TOOLKIT_HOME:-}/set_env.sh"
         "$HOME/Ascend/ascend-toolkit/set_env.sh"
+        "/usr/local/Ascend/cann-9.2.0/set_env.sh"
         "/usr/local/Ascend/ascend-toolkit/set_env.sh"
     )
     for env_sh in "${candidates[@]}"; do
@@ -41,8 +48,78 @@ source_cann_env() {
 
 source_cann_env
 
-# 2. 校验关键依赖（find_spec 只查存在性，不触发 import，避免 torch_npu 加载依赖）
-"$PYTHON" - <<'EOF'
+# 2. 修复/校验 cannbot-dsl 0.0.3 wheel。
+# find_spec("cannbotdsl") 对不完整的 namespace package 也会返回结果，
+# 因此必须导入样例实际使用的子模块，才能确认基础 wheel 可用。
+check_cannbotdsl_version() {
+    "$PYTHON" - <<'EOF'
+import importlib.metadata as metadata
+
+expected = "0.0.3"
+for distribution in ("cannbot-dsl", "cannbotdsl"):
+    try:
+        version = metadata.version(distribution)
+    except metadata.PackageNotFoundError:
+        continue
+    if version != expected:
+        raise SystemExit(
+            f"[ERROR] {distribution} {version} is installed; "
+            f"this CI requires exactly cannbot-dsl {expected} and will not install 0.3.0."
+        )
+EOF
+}
+
+check_cannbotdsl_api() {
+    "$PYTHON" - <<'EOF'
+import importlib.metadata as metadata
+
+if metadata.version("cannbot-dsl") != "0.0.3":
+    raise RuntimeError("cannbot-dsl 0.0.3 is required")
+import cannbotdsl
+from cannbotdsl import dtypes
+from cannbotdsl.arch import get_block_idx
+from cannbotdsl.jit_runner import jit
+from cannbotdsl.tensor import make_layout, _layout_op_wrapper
+from cannbotdsl.typing.types import Tensor
+EOF
+}
+
+if ! check_cannbotdsl_version >/dev/null 2>&1; then
+    check_cannbotdsl_version >&2
+    exit 1
+fi
+
+if ! check_cannbotdsl_api >/dev/null 2>&1
+then
+    local_wheel=""
+    for wheel_root in "${CANNBOTDSL_WHEEL_ROOTS[@]}"; do
+        if [[ -d "$wheel_root" ]]; then
+            local_wheel="$(find "$wheel_root" -type f \
+                \( -iname 'cannbot_dsl-0.0.3*.whl' -o -iname 'cannbot-dsl-0.0.3*.whl' \
+                -o -iname 'cannbotdsl-0.0.3*.whl' -o -iname 'cannbotdsl_0.0.3*.whl' \) \
+                -printf '%T@ %p\n' 2>/dev/null | sort -nr | sed -n '1s/^[^ ]* //p')"
+        fi
+        [[ -n "$local_wheel" ]] && break
+    done
+    if [[ -n "$local_wheel" ]]; then
+        echo "[INFO] installing local cannbotdsl wheel: ${local_wheel}"
+        if ! "$PYTHON" -m pip install --quiet --no-deps --force-reinstall "$local_wheel"; then
+            echo "[ERROR] failed to install cannbotdsl wheel: ${local_wheel}" >&2
+            exit 1
+        fi
+        if ! check_cannbotdsl_api >/dev/null 2>&1; then
+            echo "[ERROR] installed wheel does not provide the required cannbotdsl API" >&2
+            exit 1
+        fi
+    else
+        echo "[ERROR] complete cannbot-dsl 0.0.3 wheel is required; refusing to install any other version." >&2
+        echo "[ERROR] searched: ${CANNBOTDSL_WHEEL_ROOTS[*]}" >&2
+        exit 1
+    fi
+fi
+
+# 3. 校验关键依赖（find_spec 只查存在性，不触发 torch_npu 加载依赖）
+if ! "$PYTHON" - <<'EOF'
 import importlib.util
 
 required = {
@@ -63,8 +140,11 @@ if missing:
     raise SystemExit(1)
 print("[INFO] all required modules importable")
 EOF
+then
+    exit 1
+fi
 
-# 3. 探测 NPU 设备（决定是否运行 npu 标记的用例）
+# 4. 探测 NPU 设备（决定是否运行 npu 标记的用例）
 npu_count=$("$PYTHON" - <<'EOF' 2>/dev/null || echo 0
 try:
     import torch_npu

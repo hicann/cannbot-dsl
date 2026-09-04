@@ -9,13 +9,13 @@
 import math
 
 import torch
+from torch import as_tensor as from_torch_npu
 
 import cannbotdsl
 from cannbotdsl import dtypes
 from cannbotdsl.buffer import Buffer
 from cannbotdsl.jit_runner import jit
 from cannbotdsl.kernel_launcher import kernel
-from cannbotdsl.runtime import from_torch_npu
 from cannbotdsl.arch import get_block_idx, get_block_num
 from cannbotdsl.channel import Channel
 from cannbotdsl.constexpr import const_expr

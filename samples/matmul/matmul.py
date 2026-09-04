@@ -18,6 +18,7 @@ Formula:  C[M,N] = A[M,K] @ B[N,K]^T   (fp16/bf16 inputs, fp32 accumulator)
 
 import math
 import torch
+from torch import as_tensor as from_torch_npu
 from cannbotdsl import dtypes
 from cannbotdsl.arch import get_block_idx, get_block_num
 from cannbotdsl.channel import Channel
@@ -26,7 +27,6 @@ from cannbotdsl.channel import Channel
 from cannbotdsl.jit_runner import jit
 from cannbotdsl.kernel_launcher import kernel
 from cannbotdsl.math import matmul as dsl_matmul
-from cannbotdsl.runtime import from_torch_npu
 from cannbotdsl.tensor import tile_view, make_copy_engine, mem_copy
 from cannbotdsl.typing.types import MemLoc, Tensor
 

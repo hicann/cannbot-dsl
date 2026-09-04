@@ -36,6 +36,16 @@ if [[ "${CANNBOT_NO_CONDA:-0}" != "1" && -n "$CANNBOT_CONDA_ENV" ]]; then
     if [[ -z "$CONDA_BASE" ]] && command -v conda >/dev/null 2>&1; then
         CONDA_BASE="$(conda info --base 2>/dev/null)"
     fi
+    # Some self-hosted runners have conda installed but do not expose its
+    # executable on PATH. Probe the standard image locations as a fallback.
+    if [[ -z "$CONDA_BASE" ]]; then
+        for candidate in /opt/conda /opt/miniconda3 /opt/anaconda3 /usr/local/miniconda3; do
+            if [[ -f "$candidate/etc/profile.d/conda.sh" ]]; then
+                CONDA_BASE="$candidate"
+                break
+            fi
+        done
+    fi
     if [[ -n "$CONDA_BASE" && -f "$CONDA_BASE/etc/profile.d/conda.sh" ]]; then
         # shellcheck disable=SC1090
         source "$CONDA_BASE/etc/profile.d/conda.sh"

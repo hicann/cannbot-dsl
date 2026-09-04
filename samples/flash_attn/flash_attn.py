@@ -27,7 +27,7 @@ from cannbotdsl.math import (
     matmul,
     cast,
 )
-from cannbotdsl.runtime import from_torch_npu
+from torch import as_tensor as from_torch_npu
 from cannbotdsl.typing.types import ChannelKind, MemLoc, Tensor
 from cannbotdsl.tensor import (
     ceil_div,

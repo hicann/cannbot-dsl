@@ -20,6 +20,7 @@ independently completes the full Cin reduction for its assigned tiles.
 """
 
 import torch
+from torch import as_tensor as from_torch_npu
 
 from cannbotdsl import dtypes
 from cannbotdsl.arch import get_block_idx, get_block_num
@@ -35,7 +36,6 @@ from cannbotdsl.integer import Int64
 from cannbotdsl.jit_runner import jit
 from cannbotdsl.kernel_launcher import kernel
 from cannbotdsl.math import matmul
-from cannbotdsl.runtime import from_torch_npu
 from cannbotdsl.tensor import mem_copy
 from cannbotdsl.typing.types import MemLoc, Tensor
 

@@ -477,7 +477,7 @@ def pointnet_sa(points, weight):
     then max-pooling aggregates points within each group.
     """
     import torch
-    from cannbotdsl.runtime import from_torch_npu
+    from torch import as_tensor as from_torch_npu
 
     K, N_per_group, D_in = points.shape
     D_out = weight.shape[0]

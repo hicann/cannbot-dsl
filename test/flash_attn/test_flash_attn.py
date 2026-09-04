@@ -43,8 +43,6 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "samples", "flash_attn"))
 
 from cannbotdsl import dtypes
-from cannbotdsl.runtime import from_torch_npu
-
 from flash_attn import flash_attn
 
 
