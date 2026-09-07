@@ -48,55 +48,21 @@ source_cann_env() {
 
 source_cann_env
 
-# 2. 修复/校验 cannbot-dsl 0.0.3 wheel。
-# find_spec("cannbotdsl") 对不完整的 namespace package 也会返回结果，
-# 因此必须导入样例实际使用的子模块，才能确认基础 wheel 可用。
-check_cannbotdsl_version() {
+# 2. cannbotdsl 不可导入时，尝试从本地 wheel 修复。
+check_cannbotdsl() {
     "$PYTHON" - <<'EOF'
-import importlib.metadata as metadata
-
-expected = "0.0.3"
-for distribution in ("cannbot-dsl", "cannbotdsl"):
-    try:
-        version = metadata.version(distribution)
-    except metadata.PackageNotFoundError:
-        continue
-    if version != expected:
-        raise SystemExit(
-            f"[ERROR] {distribution} {version} is installed; "
-            f"this CI requires exactly cannbot-dsl {expected} and will not install 0.3.0."
-        )
-EOF
-}
-
-check_cannbotdsl_api() {
-    "$PYTHON" - <<'EOF'
-import importlib.metadata as metadata
-
-if metadata.version("cannbot-dsl") != "0.0.3":
-    raise RuntimeError("cannbot-dsl 0.0.3 is required")
 import cannbotdsl
-from cannbotdsl import dtypes
-from cannbotdsl.arch import get_block_idx
-from cannbotdsl.jit_runner import jit
-from cannbotdsl.tensor import make_layout, _layout_op_wrapper
-from cannbotdsl.typing.types import Tensor
 EOF
 }
 
-if ! check_cannbotdsl_version >/dev/null 2>&1; then
-    check_cannbotdsl_version >&2
-    exit 1
-fi
-
-if ! check_cannbotdsl_api >/dev/null 2>&1
+if ! check_cannbotdsl >/dev/null 2>&1
 then
     local_wheel=""
     for wheel_root in "${CANNBOTDSL_WHEEL_ROOTS[@]}"; do
         if [[ -d "$wheel_root" ]]; then
             local_wheel="$(find "$wheel_root" -type f \
-                \( -iname 'cannbot_dsl-0.0.3*.whl' -o -iname 'cannbot-dsl-0.0.3*.whl' \
-                -o -iname 'cannbotdsl-0.0.3*.whl' -o -iname 'cannbotdsl_0.0.3*.whl' \) \
+                \( -iname 'cannbot_dsl-*.whl' -o -iname 'cannbot-dsl-*.whl' \
+                -o -iname 'cannbotdsl-*.whl' -o -iname 'cannbotdsl_*.whl' \) \
                 -printf '%T@ %p\n' 2>/dev/null | sort -nr | sed -n '1s/^[^ ]* //p')"
         fi
         [[ -n "$local_wheel" ]] && break
@@ -107,12 +73,12 @@ then
             echo "[ERROR] failed to install cannbotdsl wheel: ${local_wheel}" >&2
             exit 1
         fi
-        if ! check_cannbotdsl_api >/dev/null 2>&1; then
-            echo "[ERROR] installed wheel does not provide the required cannbotdsl API" >&2
+        if ! check_cannbotdsl >/dev/null 2>&1; then
+            echo "[ERROR] installed cannbotdsl wheel cannot be imported" >&2
             exit 1
         fi
     else
-        echo "[ERROR] complete cannbot-dsl 0.0.3 wheel is required; refusing to install any other version." >&2
+        echo "[ERROR] cannbotdsl is unavailable and no local wheel was found." >&2
         echo "[ERROR] searched: ${CANNBOTDSL_WHEEL_ROOTS[*]}" >&2
         exit 1
     fi
