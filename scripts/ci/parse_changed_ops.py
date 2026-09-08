@@ -97,6 +97,17 @@ def load_operator_list(op_list_path):
     return desc.get("operators", [])
 
 
+def load_ignored_paths(config_path):
+    """Load exact paths that do not affect the operator test scope."""
+    with open(config_path, encoding="utf-8") as f:
+        desc = yaml.safe_load(f)
+
+    ignored = desc.get("ignore", [])
+    if not isinstance(ignored, list):
+        ignored = [ignored]
+    return {Path(path) for path in ignored}
+
+
 def is_skippable(file_path):
     return file_path.endswith(_SKIP_SUFFIXES)
 
@@ -118,13 +129,16 @@ def matching_ops(modules, line):
     return None
 
 
-def collect_related_ops(modules, changed_list_path):
+def collect_related_ops(modules, changed_list_path, ignored_paths=()):
     """Collect related operator options for the changed-file list."""
     related = []
     with open(changed_list_path, encoding="utf-8") as f:
         for line in f:
             line = normalize_line(line)
             if not line or line.startswith("#") or is_skippable(line):
+                continue
+            if Path(line) in ignored_paths:
+                logger.info("ignored metadata file: %s", line)
                 continue
             options = matching_ops(modules, line)
             if options:
@@ -172,7 +186,8 @@ def main():
         return 1, ""
 
     modules = load_modules(args.config)
-    related = collect_related_ops(modules, args.changed_list)
+    ignored_paths = load_ignored_paths(args.config)
+    related = collect_related_ops(modules, args.changed_list, ignored_paths)
     return 0, resolve_ops_output(related, args.op_list)
 
 

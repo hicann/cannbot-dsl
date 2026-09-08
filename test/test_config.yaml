@@ -14,12 +14,18 @@
 # 递归遍历配置树，命中 module 结点后读取其 src 与 options。
 #
 # 字段说明：
+#   ignore: ------------------ [可选] 不影响算子测试范围的精确文件路径列表
 #   module: True ------------- 固定写法，标识此处为一个结点
 #   src: --------------------- [可选] 看护的源码/测试路径列表，其中任一文件被修改时触发
 #   options: ----------------- [可选] 命中结点后需要验证的算子列表；all 表示运行全部算子
 #
 # 匹配规则：变更文件路径以某个 src 为前缀（或等于 src）即命中该结点。
 # 公共文件（conftest.py、scripts、依赖清单等）改动会触发 all，即全量验证。
+
+ignore:
+  - scripts/ci/operator_list.yaml
+  - scripts/ci/parse_changed_ops.py
+  - test/test_config.yaml
 
 voxel_conv:
   module: True
