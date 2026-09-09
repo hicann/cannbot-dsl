@@ -75,6 +75,14 @@ rms_norm:
   options:
     - rms_norm
 
+kv_compress_epilog:
+  module: True
+  src:
+    - samples/kv_compress_epilog
+    - test/kv_compress_epilog
+  options:
+    - kv_compress_epilog
+
 shared:
   module: True
   src:
