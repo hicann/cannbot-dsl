@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Tests for the matmul kernel (transpose_a=False, transpose_b=True).
+"""Precision tests for the matmul kernel (transpose_a=False, transpose_b=True).
 
 Formula:  C[M,N] = A[M,K] @ B[N,K]^T   (fp16/bf16 inputs, fp32 accumulator)
 
@@ -27,7 +27,18 @@ import pytest
 import torch
 from ml_dtypes import bfloat16
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "samples", "matmul"))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "..",
+        "samples",
+        "matmul",
+        "matmul",
+    ),
+)
 
 from matmul import matmul
 
@@ -132,7 +143,9 @@ def assert_isclose(actual: np.ndarray, golden: np.ndarray, dtype: torch.dtype) -
     actual = actual.reshape(-1)
     golden = golden.reshape(-1)
     if actual.size != golden.size:
-        raise AssertionError(f"Output size mismatch: actual={actual.size}, golden={golden.size}")
+        raise AssertionError(
+            f"Output size mismatch: actual={actual.size}, golden={golden.size}"
+        )
 
     rtol, ptol = _dtype_tolerances(dtype)
     atol = _DEFAULT_ATOL
@@ -180,14 +193,18 @@ def _cast_output_dtype(array: np.ndarray, dtype: torch.dtype) -> np.ndarray:
 
 def _normalize_compare_dtype(array: np.ndarray) -> np.ndarray:
     """Promote bfloat16 to float32 so numpy comparison primitives accept it."""
-    if hasattr(array, "dtype") and hasattr(array.dtype, "name") and array.dtype.name == "bfloat16":
+    if (
+        hasattr(array, "dtype")
+        and hasattr(array.dtype, "name")
+        and array.dtype.name == "bfloat16"
+    ):
         return array.astype("float32", copy=False)
     return array
 
 
 _DEFAULT_ATOL = 1e-8
 _DTYPE_TOLERANCES = {
-    torch.float16:  (0.001, 0.001),
+    torch.float16: (0.001, 0.001),
     torch.bfloat16: (0.001, 0.001),
 }
 _DEFAULT_TOLERANCES = (0.0001, 0.0001)
@@ -206,11 +223,13 @@ def _dtype_tolerances(dtype: torch.dtype) -> tuple[float, float]:
 @pytest.mark.npu
 @pytest.mark.parametrize("m,k,n", _TEST_SHAPES)
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
-def test_matmul_precision(m: int, k: int, n: int, dtype: torch.dtype) -> None:
+def test_matmul(m: int, k: int, n: int, dtype: torch.dtype) -> None:
     pytest.importorskip("torch_npu")
 
     inputs = make_inputs(
-        m, k, n,
+        m,
+        k,
+        n,
         transpose_a=_TRANSPOSE_A,
         transpose_b=_TRANSPOSE_B,
         dtype=dtype,
@@ -218,7 +237,8 @@ def test_matmul_precision(m: int, k: int, n: int, dtype: torch.dtype) -> None:
     npu_inputs = maybe_to_npu(inputs)
 
     c_npu = matmul(
-        npu_inputs.a, npu_inputs.b,
+        npu_inputs.a,
+        npu_inputs.b,
         transpose_a=_TRANSPOSE_A,
         transpose_b=_TRANSPOSE_B,
     )
@@ -229,8 +249,14 @@ def test_matmul_precision(m: int, k: int, n: int, dtype: torch.dtype) -> None:
 
     assert_isclose(result_npu, golden.result, dtype)
 
-    max_err = float(np.abs(result_npu.astype(np.float32) - golden.result.astype(np.float32)).max())
+    max_err = float(
+        np.abs(result_npu.astype(np.float32) - golden.result.astype(np.float32)).max()
+    )
     logging.info(
         "matmul (M=%s,K=%s,N=%s,dtype=%s) max|err|=%.4e finished!",
-        m, k, n, dtype, max_err,
+        m,
+        k,
+        n,
+        dtype,
+        max_err,
     )

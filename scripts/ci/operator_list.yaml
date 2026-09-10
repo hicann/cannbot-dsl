@@ -16,3 +16,5 @@ operators:
   - pointnet_sa
   - rms_norm
   - kv_compress_epilog
+  - matmul/quant_matmul
+  - grouped_matmul

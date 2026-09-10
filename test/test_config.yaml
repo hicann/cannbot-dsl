@@ -55,10 +55,26 @@ flash_kda:
 matmul:
   module: True
   src:
-    - samples/matmul
-    - test/matmul
+    - samples/matmul/matmul
+    - test/matmul/matmul
   options:
     - matmul
+
+quant_batch_matmul_mxfp8:
+  module: True
+  src:
+    - samples/matmul/quant_matmul
+    - test/matmul/quant_matmul
+  options:
+    - matmul/quant_matmul
+
+grouped_matmul:
+  module: True
+  src:
+    - samples/grouped_matmul
+    - test/grouped_matmul
+  options:
+    - grouped_matmul
 
 pointnet_sa:
   module: True
