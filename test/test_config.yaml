@@ -23,6 +23,7 @@
 # 公共文件（conftest.py、scripts、依赖清单等）改动会触发 all，即全量验证。
 
 ignore:
+  - install_deps.sh
   - scripts/ci/operator_list.yaml
   - scripts/ci/parse_changed_ops.py
   - test/test_config.yaml

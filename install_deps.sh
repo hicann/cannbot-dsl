@@ -21,7 +21,6 @@ CANNBOTDSL_WHEEL_ROOT="${CANNBOTDSL_WHEEL_ROOT:-/opt/cannbot-dsl}"
 CANNBOTDSL_WHEEL_ROOTS=(
     "$CANNBOTDSL_WHEEL_ROOT"
     "${HOME:-}/.cache/cannbot-bootstrap"
-    "/home/l00940154/.cache/cannbot-bootstrap"
 )
 
 # 1. 可选地加载 CANN 环境（torch_npu 依赖 libhccl 等动态库）
