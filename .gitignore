@@ -9,6 +9,9 @@ venv/
 .ruff_cache/
 build/
 dist/
+docs/node_modules/
+docs/.vitepress/.temp/
+docs/.vitepress/cache/
 log/
 oat_reports/
 *.log
