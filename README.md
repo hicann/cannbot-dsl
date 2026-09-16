@@ -19,6 +19,8 @@
 | voxel_conv | $C[N, Co, Ho, Wo] = \text{VoxelConv}(x, filter)$ | [samples/voxel_conv](samples/voxel_conv) |
 | flash_attn | $O = softmax(QK^T \cdot scale) V$ | [samples/flash_attn](samples/flash_attn) |
 | flash_kda | Kimi Delta Attention prefill 融合算子 | [samples/flash_kda](samples/flash_kda) |
+| flash_kda_metadata | FlashKDA 调度 metadata 生成（AICPU） | [samples/flash_kda_metadata](samples/flash_kda_metadata) |
+| fused_recurrent_kda_snapshot | Kimi Delta Attention decode（1～8 token，状态快照） | [samples/fused_recurrent_kda_snapshot](samples/fused_recurrent_kda_snapshot) |
 | matmul | $C[M,N] = A[M,K] @ B[N,K]^T$ | [samples/matmul/matmul](samples/matmul/matmul) |
 | quant_batch_matmul_mxfp8 | $C[M,N] = Dequant(A)[M,K] @ Dequant(B)[N,K]^T$ | [samples/matmul/quant_matmul](samples/matmul/quant_matmul) |
 | grouped_matmul | $y_i[m_i,n_i] = x_i[m_i,k_i] \times weight_i[k_i,n_i]$ | [samples/grouped_matmul](samples/grouped_matmul) |
@@ -33,6 +35,8 @@
 │   ├── voxel_conv/     # VoxelConv 卷积
 │   ├── flash_attn/     # Flash Attention
 │   ├── flash_kda/      # Kimi Delta Attention
+│   ├── flash_kda_metadata/ # FlashKDA 调度 metadata（AICPU）
+│   ├── fused_recurrent_kda_snapshot/ # KDA decode 状态快照
 │   ├── matmul/         # 矩阵乘
 │   │   ├── matmul/         # 非量化矩阵乘
 │   │   └── quant_matmul/   # MXFP8 全量化矩阵乘
@@ -44,6 +48,8 @@
 │   ├── voxel_conv/
 │   ├── flash_attn/
 │   ├── flash_kda/
+│   ├── flash_kda_metadata/
+│   ├── fused_recurrent_kda_snapshot/
 │   ├── matmul/
 │   │   ├── matmul/
 │   │   └── quant_matmul/

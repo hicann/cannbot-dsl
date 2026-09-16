@@ -1,5 +1,17 @@
 ## 🔥 更新日志
 
+### 【2026-09-15】
+#### 新特性 New Features
+- 【flash_kda_metadata】新增 FlashKDA 配套的独立 AICPU 调度算子 `flash_kda_metadata()`：按 64 个 token 将有效序列划分为 chunk，生成各轮 batch、任务前缀和、核间任务区间与有效序列长度等调度信息，供 `flash_kda` 消费；不读取 Q/V/state 数值，也不计算 attention 输出，返回一维 int32 张量。支持 BNSD / BSND / TND 布局（TND 必传 `cu_seqlens`，BNSD/BSND 可选传以表示各 batch 有效长度），约束 D = 128、Nv % Nqk == 0、Nv <= WORKSPACE_SLOTS（当前 861）、最多使用 32 个 AIC；调度配置不变时 metadata 可在层间复用。共 8 个 NPU 用例，覆盖三种布局、变长尾块与 858/861/864 容量边界。
+
+- 【fused_recurrent_kda_snapshot】新增 KDA decode 算子 `fused_recurrent_kda()`：计算 1～8 token 的 KDA decode，并把每个 token 的递归状态写入 state-pool 指定槽位，用于为候选分支保存完整状态的 Snapshot 协议。Q/K 行级 L2 normalize、门控激活与逐 token 递推与 ReplaySSM 一致，`num_accepted_tokens` 用于选择前一轮已接受的状态。支持 BSND / BNSD / packed TND，D = 128、N <= 96、单序列长度不超过 8；`state` 为 `[pool_slots, N, 128, 128]`（BF16 或 FP32），返回 `(state, out)`，state 原地更新。测试覆盖三种布局、BF16/FP32 state、非连续 state 索引与多轮状态更新，并与 PyTorch golden 对照。
+
+#### 特性增强 Feature Enhancement
+- 【flash_kda】接口升级为「调度与计算解耦」：新增必选参数 `metadata` 与布局 `TND`，`flash_kda()` 不再生成调度信息、也不启动 AICPU，改为消费配套 [`flash_kda_metadata`](samples/flash_kda_metadata) 的输出，可在调度配置相同的层间复用；BNSD/BSND 支持 `cu_seqlens` 变长，TND 以 `cu_seqlens` 表达 packed 变长序列；序列长度不再要求 64 对齐，尾块由内核处理。**注意：`metadata` 为必选参数，属破坏性接口变更，旧调用方式不再可用。** 配套 README 按算子文档模板重构，性能章节由「对比 H800 FlashKDA」图示改为 msprof 实测表。
+
+#### 测试框架 Test Framework
+- 【测试】新增 `test/_samples_path.py` 共享加载器，为每个样例分配私有包前缀（`_cannbot_samples.*`）按路径加载，避免与环境中已安装的同名外部模块冲突；新增 flash_kda_metadata、fused_recurrent_kda_snapshot 测试，flash_kda 测试重写为 12 个 NPU 用例（布局精度、非对齐尾块、跨轮调度、归一化 K 快照补零回归，容差 atol=rtol=5e-3），并内联 `cpu_chunk` 与 `npu_chunk` 两个 PyTorch golden 做输出及最终 state 的三方对照。
+
 ### 【2026-09-11】
 #### 文档 Documentation
 - 【文档站点】搭建基于 VitePress 的文档站点框架（`docs/`），配置站点标题、描述、base 路径、`cleanUrls`、`lastUpdated`、页脚与 sitemap，并声明 `package.json` / `package-lock.json` 依赖。
