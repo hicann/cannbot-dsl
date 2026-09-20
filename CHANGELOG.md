@@ -12,6 +12,12 @@
 #### 测试框架 Test Framework
 - 【测试】新增 `test/_samples_path.py` 共享加载器，为每个样例分配私有包前缀（`_cannbot_samples.*`）按路径加载，避免与环境中已安装的同名外部模块冲突；新增 flash_kda_metadata、fused_recurrent_kda_snapshot 测试，flash_kda 测试重写为 12 个 NPU 用例（布局精度、非对齐尾块、跨轮调度、归一化 K 快照补零回归，容差 atol=rtol=5e-3），并内联 `cpu_chunk` 与 `npu_chunk` 两个 PyTorch golden 做输出及最终 state 的三方对照。
 
+### 【2026-09-14】
+#### 文档 Documentation
+- 【文档站点】在上一步的站点框架上完成内容与主题建设：`docs/.vitepress/config.mts` 扩展顶部导航（开始使用 / 样例 / API 文档 / 参与贡献 / 关于）、各分区侧边栏、基于 local provider 的中文全文搜索，以及「本页目录 / 上一页 / 下一页 / 返回顶部 / 切换主题」等界面文案，并补充 `theme-color` 与 favicon；新增主题目录 `.vitepress/theme/`（`index.ts` 与 `custom.css`，含亮/暗两套品牌色变量与首页 Hero、特性卡片、表格样式），首页改为 `layout: home` 的 Hero + 入门教程 / 样例参考 / DSL API 三张特性卡片；新增 `getting-started/`、`guide/`（项目介绍、仓库结构）、`examples/`（样例导航、运行测试）、`community/contributing.md`、`about/scope.md`、`about/deployment.md` 等页面，覆盖项目定位与支持范围（NPU ARCH 3510 / Ascend 950PR / 950DT）、样例导航、测试与贡献流程、文档分批发布方式；`docs/README.md` 补充本地开发（5173）与构建预览（4174）说明，`.gitignore` 忽略 `docs/node_modules/` 及 `.vitepress` 的 `.temp/`、`cache/`。
+
+- 【API 文档】确立公共接口文档的分类与编写模板：接口按调用位置与执行模型分为 Host API、Kernel API、AI CPU API 三类，新增通用接口文档模板 `docs/api/api-template.md`（产品支持情况、功能说明、函数原型、参数与约束等章节，要求以公开接口和验证结果为准，未经验证的产品不得标记为「支持」），并按模板落地首批接口页——数据搬运 `api/operations/data-movement/mem-copy` 与系统变量访问 `api/operations/system/get-core-id`。
+
 ### 【2026-09-11】
 #### 文档 Documentation
 - 【文档站点】搭建基于 VitePress 的文档站点框架（`docs/`），配置站点标题、描述、base 路径、`cleanUrls`、`lastUpdated`、页脚与 sitemap，并声明 `package.json` / `package-lock.json` 依赖。
