@@ -8,6 +8,12 @@
 
 ## 概述
 
+CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体层，用 Agent 完成 AscendC/PyPTO/TileLang/Triton 等各类语言的算子开发、模型迁移与推理优化，并延伸至图模式、Runtime 等更多 CANN 开发场景。
+
+本仓（cannbot-dsl）是其 DSL 仓，提供 agent 亲和语言；仓群还包括 [cannbot](https://gitcode.com/cann/cannbot)、[cannbot-skills](https://gitcode.com/cann/cannbot-skills)、[cannbot-knowledge](https://gitcode.com/cann/cannbot-knowledge)、[cann-bench](https://gitcode.com/cann/cann-bench)、[cannbot-sentry](https://gitcode.com/cann/cannbot-sentry) 等仓库，结构如下。
+
+![CANNBot 仓群结构](docs/figures/cannbot-repo-map.png)
+
 当前仓库中的 samples 使用 CANNBot 基于 CANNBot-DSL 生成，涵盖 VoxelConv、PointNet Set Abstraction、Flash Attention、Kimi Delta Attention 等复杂算子。本次开源样例代码，自定义开发、测试等功能将于近期发布，敬请期待。
 
 项目面向 NPU ARCH 3510（Ascend 950PR / Ascend 950DT），详见 [算子列表](#算子列表)。
