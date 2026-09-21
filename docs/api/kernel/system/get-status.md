@@ -1,0 +1,91 @@
+---
+title: get_status
+api_name: get_status
+category: system
+api_group: kernel
+layer: system
+call_context: device
+execution_unit: scalar
+status: experimental
+since: 待追溯
+---
+
+# `get_status`
+
+## 产品支持情况
+
+- Ascend 950PR/Ascend 950DT：支持
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：不支持
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：不支持
+- Atlas 200I/500 A2 推理产品：不支持
+- Atlas 推理系列产品 AI Core：不支持
+- Atlas 推理系列产品 Vector Core：不支持
+- Atlas 训练系列产品：不支持
+
+## 功能说明
+
+读取当前执行核的状态寄存器。返回值中的标志位可用于检查数值过大（溢出）、数值过小（下溢）以及非数（NaN）或无穷（INF）输入。
+
+## 函数原型
+
+```python
+def get_status() -> Int64: ...
+```
+
+## 参数说明
+
+无。
+
+## 返回值说明
+
+返回状态寄存器的原始值。L0C 是矩阵计算结果缓存，UB 是统一缓冲区。各标志位含义如下。
+
+| bit | 含义 |
+| --- | --- |
+| 5 | 浮点运算溢出；`int16`、`int32` 向量（SIMD）算术运算溢出也会置位。 |
+| 6 | 浮点运算结果的绝对值过小，发生下溢。 |
+| 7 | 浮点数转换为无符号整数时，输入值为负数。 |
+| 8 | 从 L0C 搬运到 UB 时发生溢出，例如 `float32` 转 `float16`。 |
+| 9 | 从 L0C 搬运到 UB 时，转换结果的绝对值过小，发生下溢，例如 `float32` 转 `float16`。 |
+| 10 | 矩阵（Cube）累加运算溢出。 |
+| 11 | 矩阵（Cube）累加结果的绝对值过小，发生下溢。 |
+| 13 | 标量指令输入为 NaN/INF。 |
+| 14 | 向量指令输入为 NaN/INF。 |
+| 15 | 矩阵（Cube）指令输入为 NaN/INF。 |
+| 61 | 数据搬运指令输入为 NaN/INF。 |
+| 未列出的 bit | 保留位，取值没有定义。 |
+
+## 约束说明
+
+无。
+
+## 调用示例
+
+```python
+import cannbotdsl as cb
+import torch
+import torch_npu  # noqa: F401
+
+@cb.kernel
+def kernel(output):
+    output[0] = cb.get_status()
+
+@cb.jit
+def run(output):
+    kernel[1](output)
+
+output = torch.empty(1, dtype=torch.int64, device="npu")
+run(output)
+torch.npu.synchronize()
+status = int(output.cpu()[0])
+assert isinstance(status, int)
+print(f"status: 0x{status & ((1 << 64) - 1):016x}")
+print("get_status example passed")
+```
+
+### 预期结果
+
+```text
+status: 0x<16 位十六进制数>
+get_status example passed
+```

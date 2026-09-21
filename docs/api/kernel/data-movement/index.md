@@ -4,4 +4,4 @@
 
 ## 接口
 
-- [`mem_copy`](/api/operations/data-movement/mem-copy)：在 Tensor 之间搬运数据。
+- [`mem_copy`](/api/kernel/data-movement/mem-copy)：在 Tensor 之间搬运数据。

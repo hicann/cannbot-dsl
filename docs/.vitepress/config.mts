@@ -42,13 +42,32 @@ export default defineConfig({
         text: 'API 文档',
         link: '/api/',
         items: [
-          { text: 'Host API', link: '/api/host/' },
+          { text: 'Host API', link: '/api/host/', collapsed: false, items: [
+            { text: '平台信息', link: '/api/host/platform-profiling/', collapsed: false, items: [
+              { text: 'get_platform_info', link: '/api/host/platform-profiling/get-platform-info' },
+              { text: 'get_mem_size', link: '/api/host/platform-profiling/get-mem-size' }
+            ] }
+          ] },
           { text: 'Kernel API', link: '/api/kernel/', collapsed: false, items: [
-            { text: '数据搬运', link: '/api/operations/data-movement/', collapsed: false, items: [
-              { text: 'mem_copy', link: '/api/operations/data-movement/mem-copy' }
+            { text: '数据搬运', link: '/api/kernel/data-movement/', collapsed: false, items: [
+              { text: 'mem_copy', link: '/api/kernel/data-movement/mem-copy' }
             ] },
-            { text: '系统变量访问', link: '/api/operations/system/', collapsed: false, items: [
-              { text: 'get_core_id', link: '/api/operations/system/get-core-id' }
+            { text: '系统变量访问', link: '/api/kernel/system/', collapsed: false, items: [
+              { text: 'get_block_idx', link: '/api/kernel/system/get-block-idx' },
+              { text: 'get_block_num', link: '/api/kernel/system/get-block-num' },
+              { text: 'get_subblock_id', link: '/api/kernel/system/get-subblock-id' },
+              { text: 'get_subblock_dim', link: '/api/kernel/system/get-subblock-dim' },
+              { text: 'get_core_id', link: '/api/kernel/system/get-core-id' },
+              { text: 'get_system_cycle', link: '/api/kernel/system/get-system-cycle' },
+              { text: 'get_status', link: '/api/kernel/system/get-status' },
+              { text: 'get_vf_len', link: '/api/kernel/system/get-vf-len' },
+              { text: 'get_squeeze_status', link: '/api/kernel/system/get-squeeze-status' }
+            ] },
+            { text: '同步与缓存控制', link: '/api/kernel/synchronization-cache/', collapsed: false, items: [
+              { text: 'dcci_single', link: '/api/kernel/synchronization-cache/dcci-single' },
+              { text: 'dcci_entire_out', link: '/api/kernel/synchronization-cache/dcci-entire-out' },
+              { text: 'dcci_entire_atomic', link: '/api/kernel/synchronization-cache/dcci-entire-atomic' },
+              { text: 'dci', link: '/api/kernel/synchronization-cache/dci' }
             ] }
           ] },
           { text: 'AI CPU API', link: '/api/aicpu/' },
