@@ -28,7 +28,7 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 | flash_kda_metadata | FlashKDA 调度 metadata 生成（AICPU） | [samples/flash_kda_metadata](samples/flash_kda_metadata) |
 | fused_recurrent_kda_snapshot | Kimi Delta Attention decode（1～8 token，状态快照） | [samples/fused_recurrent_kda_snapshot](samples/fused_recurrent_kda_snapshot) |
 | matmul | $C[M,N] = A[M,K] @ B[N,K]^T$ | [samples/matmul/matmul](samples/matmul/matmul) |
-| quant_batch_matmul_mxfp8 | $C[M,N] = Dequant(A)[M,K] @ Dequant(B)[N,K]^T$ | [samples/matmul/quant_matmul](samples/matmul/quant_matmul) |
+| quant_matmul | $C[M,N] = Dequant(A)[M,K] @ Dequant(B)[N,K]^T$ | [samples/matmul/quant_matmul](samples/matmul/quant_matmul) |
 | grouped_matmul | $y_i[m_i,n_i] = x_i[m_i,k_i] \times weight_i[k_i,n_i]$ | [samples/grouped_matmul](samples/grouped_matmul) |
 | pointnet_sa | $\text{feat}[K, D_{out}] = \max_{j} \text{MLP}(\text{points}[K, j, D_{in}])$ | [samples/pointnet_sa](samples/pointnet_sa) |
 | rms_norm | $y = x \cdot rstd \cdot \gamma$ | [samples/rms_norm](samples/rms_norm) |
@@ -45,7 +45,7 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 │   ├── fused_recurrent_kda_snapshot/ # KDA decode 状态快照
 │   ├── matmul/         # 矩阵乘
 │   │   ├── matmul/         # 非量化矩阵乘
-│   │   └── quant_matmul/   # MXFP8 全量化矩阵乘
+│   │   └── quant_matmul/   # MXFP8/MXFP4 全量化矩阵乘
 │   ├── grouped_matmul/ # 非量化分组矩阵乘
 │   ├── pointnet_sa/    # PointNet Set Abstraction
 │   ├── rms_norm/       # RmsNorm 归一化

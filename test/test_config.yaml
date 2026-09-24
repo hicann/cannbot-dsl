@@ -60,7 +60,7 @@ matmul:
   options:
     - matmul
 
-quant_batch_matmul_mxfp8:
+quant_matmul:
   module: True
   src:
     - samples/matmul/quant_matmul
