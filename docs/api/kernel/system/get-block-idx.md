@@ -41,6 +41,9 @@ def get_block_idx() -> Int64: ...
 ## 返回值说明
 
 返回 `[0, get_block_num())` 范围内的 block 索引。
+## 流水类型
+
+`PIPE_S`
 
 ## 约束说明
 
@@ -48,32 +51,42 @@ def get_block_idx() -> Int64: ...
 
 ## 调用示例
 
+将代码保存为`get_block_idx.py`后，可通过`python`命令运行。
+
+以下调用示例代码仅Ascend 950PR&950DT系列产品支持。
+
 ```python
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# Licensed under the CANN Open Software License Agreement Version 2.0.
+
 import cannbotdsl as cb
 import torch
-import torch_npu  # noqa: F401
+import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
+
 
 @cb.kernel
-def kernel(output):
+def get_block_idx_kernel(output):
     index = cb.get_block_idx()
-    output[index] = index
+    cb.scalar.vec_store_bypass(output.ptr(index), index)
+
 
 @cb.jit
 def run(output):
-    kernel[4](output)
+    get_block_idx_kernel[4](output)
 
-output = torch.full((4,), -1, dtype=torch.int64, device="npu")
+
+output = torch.full((4,), -1, dtype=torch.int64, device="npu:0")
 run(output)
 torch.npu.synchronize()
-block_indices = output.cpu().tolist()
-assert block_indices == [0, 1, 2, 3]
-print(f"block_indices: {block_indices}")
+
+assert output.cpu().tolist() == [0, 1, 2, 3]
 print("get_block_idx example passed")
+print(f"block_indices={output.cpu().tolist()}")
 ```
 
 ### 预期结果
 
 ```text
-block_indices: [0, 1, 2, 3]
 get_block_idx example passed
+block_indices=[0, 1, 2, 3]
 ```

@@ -39,10 +39,13 @@ def get_squeeze_status() -> Int64: ...
 ## 返回值说明
 
 返回 squeeze 有效数据长度，单位为字节。
+## 流水类型
+
+`PIPE_S`
 
 ## 约束说明
 
-- 必须在兼容的压缩/非对齐存储序列产生有效数据长度之后读取；独立调用时返回值没有确定含义。
+- 调用本接口前，需先调用 [`vstore_unalign_begin`](../reg_compute/reg_permute_sel/vstore-unalign-begin.md) 清空 AR 特殊寄存器，再调用 [`vsqueeze_and_storeunalign_init`](../reg_compute/reg_permute_sel/vsqueeze-and-storeunalign-init.md) 标记压缩点并调用 [`vsqueeze_and_storeunalign`](../reg_compute/reg_permute_sel/vsqueeze-and-storeunalign.md) 完成数据筛选；否则返回值没有确定含义。
 
 ## 调用示例
 
@@ -55,7 +58,7 @@ import torch_npu  # noqa: F401
 
 @cb.jit
 def compact_store(ub_output):
-    with cb.vf(mode="raw"):
+    with cb.vf(mode="simd"):
         mask = cb.reg.create_mask(pattern="vl4", elem_bits=32)
         source = cb.reg.vdups(7, cb.dtypes.uint32, mask=mask)
         cursor = cb.reg.vstore_unalign_begin(ub_output)

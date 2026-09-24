@@ -39,6 +39,9 @@ def dcci_entire_out() -> None: ...
 ## 返回值说明
 
 无。
+## 流水类型
+
+`PIPE_S`
 
 ## 约束说明
 

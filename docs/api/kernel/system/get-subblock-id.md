@@ -24,7 +24,7 @@ since: 待追溯
 
 ## 功能说明
 
-获取当前 AIV 核在所属 block 内的 ID。
+获取当前逻辑 AI Core 上 Cube Core（AIC）或 Vector Core（AIV）的逻辑索引。
 
 ## 函数原型
 
@@ -38,11 +38,14 @@ def get_subblock_id() -> Int64: ...
 
 ## 返回值说明
 
-返回当前 AIV 核在所属 block 内的 ID，取值为 `0` 或 `1`。
+返回当前逻辑 AI Core 上 Cube Core（AIC）或 Vector Core（AIV）的逻辑索引，返回值始终小于 [`get_subblock_dim()`](./get-subblock-dim) 的返回值。
+## 流水类型
+
+`PIPE_S`
 
 ## 约束说明
 
-- 返回值始终小于 [`get_subblock_dim()`](./get-subblock-dim) 的返回值。
+- 本接口为只读查询接口，不修改任何寄存器或存储状态。
 
 ## 调用示例
 

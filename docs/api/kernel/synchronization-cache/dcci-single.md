@@ -41,6 +41,9 @@ def dcci_single(point) -> None: ...
 ## 返回值说明
 
 无。
+## 流水类型
+
+`PIPE_S`
 
 ## 约束说明
 

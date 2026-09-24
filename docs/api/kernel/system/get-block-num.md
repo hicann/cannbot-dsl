@@ -39,6 +39,9 @@ def get_block_num() -> Int64: ...
 ## 返回值说明
 
 返回本次启动 Kernel 时指定的 block 数量。
+## 流水类型
+
+`PIPE_S`
 
 ## 约束说明
 
@@ -46,31 +49,41 @@ def get_block_num() -> Int64: ...
 
 ## 调用示例
 
+将代码保存为`get_block_num.py`后，可通过`python`命令运行。
+
+以下调用示例代码仅Ascend 950PR&950DT系列产品支持。
+
 ```python
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# Licensed under the CANN Open Software License Agreement Version 2.0.
+
 import cannbotdsl as cb
 import torch
-import torch_npu  # noqa: F401
+import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
+
 
 @cb.kernel
-def kernel(output):
-    output[cb.get_block_idx()] = cb.get_block_num()
+def get_block_num_kernel(output):
+    cb.scalar.vec_store_bypass(output.ptr(cb.get_block_idx()), cb.get_block_num())
+
 
 @cb.jit
 def run(output):
-    kernel[4](output)
+    get_block_num_kernel[4](output)
 
-output = torch.empty(4, dtype=torch.int64, device="npu")
+
+output = torch.empty(4, dtype=torch.int64, device="npu:0")
 run(output)
 torch.npu.synchronize()
-block_nums = output.cpu().tolist()
-assert block_nums == [4, 4, 4, 4]
-print(f"block_num: {block_nums[0]}")
+
+assert output.cpu().tolist() == [4, 4, 4, 4]
 print("get_block_num example passed")
+print(f"block_num={output.cpu().tolist()[0]}")
 ```
 
 ### 预期结果
 
 ```text
-block_num: 4
 get_block_num example passed
+block_num=4
 ```

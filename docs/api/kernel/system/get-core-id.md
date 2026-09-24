@@ -39,6 +39,9 @@ def get_core_id() -> Int64: ...
 ## 返回值说明
 
 返回当前 AI Core 的编号。
+## 流水类型
+
+`PIPE_S`
 
 ## 约束说明
 
