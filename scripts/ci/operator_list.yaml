@@ -13,6 +13,7 @@ operators:
   - flash_attn
   - flash_kda
   - matmul
+  - matmul/batch_matmul
   - pointnet_sa
   - rms_norm
   - kv_compress_epilog

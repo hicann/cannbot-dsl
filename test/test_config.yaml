@@ -60,6 +60,14 @@ matmul:
   options:
     - matmul
 
+batch_matmul:
+  module: True
+  src:
+    - samples/matmul/batch_matmul
+    - test/matmul/batch_matmul
+  options:
+    - matmul/batch_matmul
+
 quant_matmul:
   module: True
   src:
