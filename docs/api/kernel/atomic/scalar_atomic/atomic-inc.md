@@ -73,29 +73,32 @@ dtype支持的数据类型为`dtypes.uint32`、`dtypes.uint64`。
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
-from cannbotdsl import dtypes
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import dtypes, host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import atomic_inc
 
-@cb.kernel
-def atomic_inc_kernel(acc):
+@kernel
+def _atomic_inc_kernel(acc):
     # 4 个 block 各自把 acc[0] 原子递增 1；value 为上界（10），0 + 4 = 4，未回绕
-    cb.scalar.atomic_inc(acc.ptr(0), dtypes.uint32(10))
+    atomic_inc(acc.ptr(0), dtypes.uint32(10))
 
-
-@cb.jit
+@host
 def run(acc):
-    atomic_inc_kernel[4](acc)
+    _atomic_inc_kernel[4](acc)
 
+def main():
+    acc = torch.zeros(1, dtype=torch.int32, device="npu:0").view(torch.uint32)
+    run(acc)
+    torch.npu.synchronize()
 
-acc = torch.zeros(1, dtype=torch.int32, device="npu:0").view(torch.uint32)
-run(acc)
-torch.npu.synchronize()
+    assert acc.cpu().tolist() == [4], acc.cpu().tolist()
+    print(f"atomic_inc example passed, acc={acc.cpu().tolist()}")
 
-assert acc.cpu().tolist() == [4], acc.cpu().tolist()
-print(f"atomic_inc example passed, acc={acc.cpu().tolist()}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

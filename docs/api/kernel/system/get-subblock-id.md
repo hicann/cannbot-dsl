@@ -50,28 +50,35 @@ def get_subblock_id() -> Int64: ...
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(output):
-    subblock_id = cb.get_subblock_id()
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.arch import get_subblock_id
+
+@kernel
+def _kernel(output):
+    subblock_id = get_subblock_id()
     output[subblock_id] = subblock_id
 
-@cb.jit
+@host
 def run(output):
-    kernel[1](output)
+    _kernel[1](output)
 
-output = torch.full((2,), -1, dtype=torch.int64, device="npu")
-run(output)
-torch.npu.synchronize()
-result = output.cpu()
-assert result[0].item() == 0
-assert result[1].item() in (-1, 1)
-subblock_ids = [index for index, value in enumerate(result.tolist()) if value >= 0]
-print(f"subblock_ids: {subblock_ids}")
-print("get_subblock_id example passed")
+def main():
+    output = torch.full((2,), -1, dtype=torch.int64, device="npu")
+    run(output)
+    torch.npu.synchronize()
+    result = output.cpu()
+    assert result[0].item() == 0
+    assert result[1].item() in (-1, 1)
+    subblock_ids = [index for index, value in enumerate(result.tolist()) if value >= 0]
+    print(f"subblock_ids: {subblock_ids}")
+    print("get_subblock_id example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

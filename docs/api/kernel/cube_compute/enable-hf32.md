@@ -98,43 +98,52 @@ def enable_hf32() -> None: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
+
+from cannbotdsl import Channel, dtypes, host, make_copy_engine, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.cube import enable_hf32
+from cannbotdsl.ops.matmul import matmul
+from cannbotdsl.tensor import MemLoc
 
 # HF32 的尾数为 10 bit，1.0 与 1 + 2^-10 的中点即 1 + 2^-11，恰好落在舍入的平局点上。
 TIE = 1.0 + 0.5 / 1024.0
 
-@cb.kernel
-def enable_hf32_kernel(a, b, c):
-    l1a = cb.Channel(cb.MemLoc.L1, shape=(16, 16), dtype=cb.dtypes.float32, depth=1)
-    l1b = cb.Channel(cb.MemLoc.L1, shape=(16, 16), dtype=cb.dtypes.float32, depth=1)
-    l0a = cb.Channel(cb.MemLoc.L0A, shape=(16, 16), dtype=cb.dtypes.float32, depth=1)
-    l0b = cb.Channel(cb.MemLoc.L0B, shape=(16, 16), dtype=cb.dtypes.float32, depth=1)
-    l0c = cb.Channel(cb.MemLoc.L0C, shape=(16, 16), dtype=cb.dtypes.float32, depth=1)
-    cb.mem_copy(l1a.produce(), a, engine=cb.make_copy_engine(format_transform="nd2nz"))
-    cb.mem_copy(l1b.produce(), b, engine=cb.make_copy_engine(format_transform="nd2nz"))
-    cb.cube.enable_hf32()
-    cb.mem_copy(l0a.produce(), l1a.consume())
-    cb.mem_copy(l0b.produce(), l1b.consume())
-    cb.matmul(l0c.produce(), l0a.consume(), l0b.consume(), init=True)
-    cb.mem_copy(c, l0c.consume())
+@kernel
+def _enable_hf32_kernel(a, b, c):
+    l1a = Channel(MemLoc.L1, shape=(16, 16), dtype=dtypes.float32, depth=1)
+    l1b = Channel(MemLoc.L1, shape=(16, 16), dtype=dtypes.float32, depth=1)
+    l0a = Channel(MemLoc.L0A, shape=(16, 16), dtype=dtypes.float32, depth=1)
+    l0b = Channel(MemLoc.L0B, shape=(16, 16), dtype=dtypes.float32, depth=1)
+    l0c = Channel(MemLoc.L0C, shape=(16, 16), dtype=dtypes.float32, depth=1)
+    mem_copy(l1a.produce(), a, engine=make_copy_engine(format_transform="nd2nz"))
+    mem_copy(l1b.produce(), b, engine=make_copy_engine(format_transform="nd2nz"))
+    enable_hf32()
+    mem_copy(l0a.produce(), l1a.consume())
+    mem_copy(l0b.produce(), l1b.consume())
+    matmul(l0c.produce(), l0a.consume(), l0b.consume(), init=True)
+    mem_copy(c, l0c.consume())
 
-@cb.jit
+@host
 def run(a, b, c):
-    enable_hf32_kernel[1](a, b, c)
+    _enable_hf32_kernel[1](a, b, c)
 
-a = torch.eye(16, dtype=torch.float32, device="npu:0") * TIE
-b = torch.eye(16, dtype=torch.float32, device="npu:0")
-c = torch.empty((16, 16), dtype=torch.float32, device="npu:0")
-run(a, b, c)
-torch.npu.synchronize()
+def main():
+    a = torch.eye(16, dtype=torch.float32, device="npu:0") * TIE
+    b = torch.eye(16, dtype=torch.float32, device="npu:0")
+    c = torch.empty((16, 16), dtype=torch.float32, device="npu:0")
+    run(a, b, c)
+    torch.npu.synchronize()
 
-# 开启HF32模式后，L0A Buffer/L0B Buffer中的float数据先舍入为HF32格式再参与Mmad计算：
-# 未调用set_hf32_round_mode时默认使用NEAREST_EVEN，TIE被舍入为1.0；
-# 未开启HF32模式时不做舍入处理，结果即为TIE本身。
-torch.testing.assert_close(c.cpu(), torch.eye(16, dtype=torch.float32))
-print(f"tie={a.cpu()[0, 0].item():.8f} -> hf32={c.cpu()[0, 0].item():.8f}")
+    # 开启HF32模式后，L0A Buffer/L0B Buffer中的float数据先舍入为HF32格式再参与Mmad计算：
+    # 未调用set_hf32_round_mode时默认使用NEAREST_EVEN，TIE被舍入为1.0；
+    # 未开启HF32模式时不做舍入处理，结果即为TIE本身。
+    torch.testing.assert_close(c.cpu(), torch.eye(16, dtype=torch.float32))
+    print(f"tie={a.cpu()[0, 0].item():.8f} -> hf32={c.cpu()[0, 0].item():.8f}")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

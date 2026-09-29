@@ -80,46 +80,52 @@ python vbitwise_or.py
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vbitwise_or, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vbitwise_or_kernel(src0, src1, dst):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vbitwise_or_kernel(src0, src1, dst):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        or_val = cb.reg.vbitwise_or(cb.reg.vload(in0, 0), cb.reg.vload(in1, 0), mask=mask)
-        cb.reg.vstore(res, 0, or_val, mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        or_val = vbitwise_or(vload(in0, 0), vload(in1, 0), mask=mask)
+        vstore(res, 0, or_val, mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst):
-    vbitwise_or_kernel[1](src0, src1, dst)
+    _vbitwise_or_kernel[1](src0, src1, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.int32, device="npu:0") + 5
+    src1 = torch.arange(64, dtype=torch.int32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.int32, device="npu:0") + 5
-src1 = torch.arange(64, dtype=torch.int32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, src1, dst)
+    torch.npu.synchronize()
 
-run(src0, src1, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), (src0 | src1).cpu())
+    print("vbitwise_or example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-torch.testing.assert_close(dst.cpu(), (src0 | src1).cpu())
-print("vbitwise_or example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

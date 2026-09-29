@@ -73,41 +73,47 @@ python mask_xor.py
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, full_mask, mask_xor, vdups, vselect, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def mask_xor_kernel(dst):
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _mask_xor_kernel(dst):
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
     res = out.produce()
-    with cb.vf(mode="simd"):
-        full = cb.reg.full_mask()
-        m = cb.reg.mask_xor(cb.reg.create_mask(pattern="m3"), cb.reg.create_mask(pattern="h"),
+    with vf(mode="simd"):
+        full = full_mask()
+        m = mask_xor(create_mask(pattern="m3"), create_mask(pattern="h"),
                             exec_mask=full)
-        one = cb.reg.vdups(1.0, cb.dtypes.float32)
-        zero = cb.reg.vdups(0.0, cb.dtypes.float32)
-        cb.reg.vstore(res, 0, cb.reg.vselect(one, zero, cond_mask=m), full)
+        one = vdups(1.0, dtypes.float32)
+        zero = vdups(0.0, dtypes.float32)
+        vstore(res, 0, vselect(one, zero, cond_mask=m), full)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(dst):
-    mask_xor_kernel[1](dst)
+    _mask_xor_kernel[1](dst)
 
+def main():
+    dst = torch.zeros(64, dtype=torch.float32, device="npu:0")
+    idx = torch.arange(64)
 
-dst = torch.zeros(64, dtype=torch.float32, device="npu:0")
-idx = torch.arange(64)
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), torch.where((idx % 3 == 0) ^ (idx < 32), 1.0, 0.0))
+    print("mask_xor example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), torch.where((idx % 3 == 0) ^ (idx < 32), 1.0, 0.0))
-print("mask_xor example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

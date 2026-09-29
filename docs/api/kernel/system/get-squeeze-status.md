@@ -52,40 +52,57 @@ def get_squeeze_status() -> Int64: ...
 以下示例在统一缓冲区（Unified Buffer，UB）中压缩存储 4 个 `uint32` 元素，再读取并打印有效数据长度。
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.jit
-def compact_store(ub_output):
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="vl4", elem_bits=32)
-        source = cb.reg.vdups(7, cb.dtypes.uint32, mask=mask)
-        cursor = cb.reg.vstore_unalign_begin(ub_output)
-        squeezed = cb.reg.vsqueeze_and_storeunalign_init(source, mask=mask)
-        cb.reg.vsqueeze_and_storeunalign(ub_output, 0, squeezed, cursor)
-        cb.reg.vsqueeze_and_storeunalign_finalize(ub_output, 0, cursor)
+from cannbotdsl import UB, dtypes, host, make_buffer
+from cannbotdsl.lang.jit import jit
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.arch import get_squeeze_status
+from cannbotdsl.ops.reg import (
+    create_mask,
+    vdups,
+    vsqueeze_and_storeunalign,
+    vsqueeze_and_storeunalign_finalize,
+    vsqueeze_and_storeunalign_init,
+    vstore_unalign_begin,
+)
 
-@cb.kernel
-def kernel(status):
-    ub_space = cb.UB.view(262144)
-    ub_output = cb.make_buffer(
-        ub_space[slice(0, 256),], dtype=cb.dtypes.uint32
+@jit
+def compact_store(ub_output):
+    with vf(mode="simd"):
+        mask = create_mask(pattern="vl4", elem_bits=32)
+        source = vdups(7, dtypes.uint32, mask=mask)
+        cursor = vstore_unalign_begin(ub_output)
+        squeezed = vsqueeze_and_storeunalign_init(source, mask=mask)
+        vsqueeze_and_storeunalign(ub_output, 0, squeezed, cursor)
+        vsqueeze_and_storeunalign_finalize(ub_output, 0, cursor)
+
+@kernel
+def _kernel(status):
+    ub_space = UB.view(262144)
+    ub_output = make_buffer(
+        ub_space[slice(0, 256),], dtype=dtypes.uint32
     )
     compact_store(ub_output)
-    status[0] = cb.get_squeeze_status()
+    status[0] = get_squeeze_status()
 
-@cb.jit
+@host
 def run(status):
-    kernel[1](status)
+    _kernel[1](status)
 
-status = torch.empty(1, dtype=torch.int64, device="npu")
-run(status)
-torch.npu.synchronize()
-valid_bytes = int(status.cpu()[0])
-assert valid_bytes == 16
-print(f"squeeze_valid_bytes: {valid_bytes}")
-print("get_squeeze_status example passed")
+def main():
+    status = torch.empty(1, dtype=torch.int64, device="npu")
+    run(status)
+    torch.npu.synchronize()
+    valid_bytes = int(status.cpu()[0])
+    assert valid_bytes == 16
+    print(f"squeeze_valid_bytes: {valid_bytes}")
+    print("get_squeeze_status example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -59,7 +59,7 @@ def vstore_unalign_post(tensor, offset, ureg: StoreUnalignReg) -> None: ...
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 需要保证目的操作数的地址加上`offset`对应的偏移地址，访问范围须位于实际可用UB范围内。
 - 该接口中的目的地址不需要32B对齐，但数据类型为`dtype`的`tensor`需要`sizeof(dtype)`字节对齐。
 - UB容量上限为256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈+2KB 框架预留，可用248KB；SIMD+SIMT混编时再划分32KB~128KB作Data Cache，可用容量进一步减少）。目的操作数地址不可超过实际可用容量，否则会报错。
@@ -80,44 +80,57 @@ def vstore_unalign_post(tensor, offset, ureg: StoreUnalignReg) -> None: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import (
+    create_mask,
+    vload,
+    vsqueeze_and_storeunalign,
+    vsqueeze_and_storeunalign_init,
+    vstore_unalign_begin,
+    vstore_unalign_post,
+)
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vstore_unalign_post_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vstore_unalign_post_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="vl32", elem_bits=32)
-        ureg = cb.reg.vstore_unalign_begin(res)
-        sq = cb.reg.vsqueeze_and_storeunalign_init(cb.reg.vload(in0, 0), mask=mask)
-        cb.reg.vsqueeze_and_storeunalign(res, 0, sq, ureg)
-        cb.reg.vstore_unalign_post(res, 0, ureg)
+    with vf(mode="simd"):
+        mask = create_mask(pattern="vl32", elem_bits=32)
+        ureg = vstore_unalign_begin(res)
+        sq = vsqueeze_and_storeunalign_init(vload(in0, 0), mask=mask)
+        vsqueeze_and_storeunalign(res, 0, sq, ureg)
+        vstore_unalign_post(res, 0, ureg)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vstore_unalign_post_kernel[1](src0, dst)
+    _vstore_unalign_post_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    assert bool((dst.cpu()[:32] == src0.cpu()[:32]).all()), f"tail mismatch: {dst.cpu()[:4].tolist()}"
+    print("vstore_unalign_post example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[31]):.4f}")
 
-assert bool((dst.cpu()[:32] == src0.cpu()[:32]).all()), f"tail mismatch: {dst.cpu()[:4].tolist()}"
-print("vstore_unalign_post example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[31]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

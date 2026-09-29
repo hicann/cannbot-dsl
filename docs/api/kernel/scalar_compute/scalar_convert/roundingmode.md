@@ -64,33 +64,37 @@ RoundingMode.NA  # 由实现按约定选择
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import dtypes, host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import RoundingMode, cast, vec_store_bypass
 
-@cb.kernel
-def rounding_mode_kernel(dst):
-    cb.scalar.vec_store_bypass(
+@kernel
+def _rounding_mode_kernel(dst):
+    vec_store_bypass(
         dst.ptr(0),
-        cb.scalar.cast(2.7, dtype=cb.dtypes.int32, rounding=cb.scalar.RoundingMode.RD),
+        cast(2.7, dtype=dtypes.int32, rounding=RoundingMode.RD),
     )
 
-
-@cb.jit
+@host
 def run(dst):
-    rounding_mode_kernel[1](dst)
+    _rounding_mode_kernel[1](dst)
 
+def main():
+    dst = torch.zeros((1,), dtype=torch.int32, device="npu:0")
 
-dst = torch.zeros((1,), dtype=torch.int32, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    result = int(dst.cpu()[0])
+    assert result == 2, result
+    print("RoundingMode example passed")
+    print(f"cast(2.7, RD) = {result}")
 
-result = int(dst.cpu()[0])
-assert result == 2, result
-print("RoundingMode example passed")
-print(f"cast(2.7, RD) = {result}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -59,30 +59,34 @@ def set_nthbit(bits, idx) -> UInt64: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import set_nthbit, vec_store_bypass
 
-@cb.kernel
-def set_nthbit_kernel(dst):
-    cb.scalar.vec_store_bypass(dst.ptr(0), cb.scalar.set_nthbit(8, 1))
+@kernel
+def _set_nthbit_kernel(dst):
+    vec_store_bypass(dst.ptr(0), set_nthbit(8, 1))
 
-
-@cb.jit
+@host
 def run(dst):
-    set_nthbit_kernel[1](dst)
+    _set_nthbit_kernel[1](dst)
 
+def main():
+    dst = torch.zeros((1,), dtype=torch.int64, device="npu:0").view(torch.uint64)
 
-dst = torch.zeros((1,), dtype=torch.int64, device="npu:0").view(torch.uint64)
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    result = int(dst.cpu().view(torch.int64)[0])
+    assert result == 10, result
+    print("set_nthbit example passed")
+    print(f"set_nthbit(8, 1) = {result}")
 
-result = int(dst.cpu().view(torch.int64)[0])
-assert result == 10, result
-print("set_nthbit example passed")
-print(f"set_nthbit(8, 1) = {result}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

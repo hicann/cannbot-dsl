@@ -82,40 +82,46 @@ python mask_or.py
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, full_mask, mask_or, update_mask, vdups, vselect, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def mask_or_kernel(dst):
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _mask_or_kernel(dst):
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
     res = out.produce()
-    with cb.vf(mode="simd"):
-        full = cb.reg.full_mask()
-        m1, _ = cb.reg.update_mask(48, elem_bits=32)
-        m = cb.reg.mask_or(m1, cb.reg.create_mask(pattern="vl16"), exec_mask=full)
-        one = cb.reg.vdups(1.0, cb.dtypes.float32)
-        zero = cb.reg.vdups(0.0, cb.dtypes.float32)
-        cb.reg.vstore(res, 0, cb.reg.vselect(one, zero, cond_mask=m), full)
+    with vf(mode="simd"):
+        full = full_mask()
+        m1, _ = update_mask(48, elem_bits=32)
+        m = mask_or(m1, create_mask(pattern="vl16"), exec_mask=full)
+        one = vdups(1.0, dtypes.float32)
+        zero = vdups(0.0, dtypes.float32)
+        vstore(res, 0, vselect(one, zero, cond_mask=m), full)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(dst):
-    mask_or_kernel[1](dst)
+    _mask_or_kernel[1](dst)
 
+def main():
+    dst = torch.zeros(64, dtype=torch.float32, device="npu:0")
 
-dst = torch.zeros(64, dtype=torch.float32, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), torch.where(torch.arange(64) < 48, 1.0, 0.0))
+    print("mask_or example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), torch.where(torch.arange(64) < 48, 1.0, 0.0))
-print("mask_or example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -76,42 +76,48 @@ def vreduce_max_datablock(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vreduce_max_datablock, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vreduce_max_datablock_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
-    cb.mem_copy(buf.produce(), src0)
+@kernel
+def _vreduce_max_datablock_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        full = cb.reg.full_mask()
-        acc = cb.reg.vreduce_max_datablock(cb.reg.vload(in0, 0), mask=full)
-        cb.reg.vstore(res, 0, acc, full)
+    with vf(mode="simd"):
+        full = full_mask()
+        acc = vreduce_max_datablock(vload(in0, 0), mask=full)
+        vstore(res, 0, acc, full)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vreduce_max_datablock_kernel[1](src0, dst)
+    _vreduce_max_datablock_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    expected = torch.zeros(64)
+    expected[:8] = src0.cpu().view(8, 8).max(dim=1).values
+    torch.testing.assert_close(dst.cpu(), expected)
+    print(f"first={float(dst.cpu()[0]):.4f}, block7={float(dst.cpu()[7]):.4f}")
 
-expected = torch.zeros(64)
-expected[:8] = src0.cpu().view(8, 8).max(dim=1).values
-torch.testing.assert_close(dst.cpu(), expected)
-print(f"first={float(dst.cpu()[0]):.4f}, block7={float(dst.cpu()[7]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

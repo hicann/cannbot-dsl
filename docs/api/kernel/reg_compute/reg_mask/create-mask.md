@@ -59,7 +59,7 @@ def create_mask(pattern: str='all', elem_bits: int=32) -> Mask: ...
 ## 约束说明
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 掩码寄存器的数量上限为8，超过上限的掩码寄存器会写入预留的8K Unified Buffer（UB）内存中，可能引起性能劣化。编译器会自动复用生命周期结束的寄存器和预留内存，若两者均可用，优先复用寄存器。
 
 ## 调用示例
@@ -72,42 +72,48 @@ def create_mask(pattern: str='all', elem_bits: int=32) -> Mask: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, full_mask, vdups, vload, vselect, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def create_mask_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
-    cb.mem_copy(buf.produce(), src0)
+@kernel
+def _create_mask_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        m = cb.reg.create_mask(pattern="vl32", elem_bits=32)
-        zero = cb.reg.vdups(0.0, cb.dtypes.float32)
-        acc = cb.reg.vselect(cb.reg.vload(in0, 0), zero, cond_mask=m)
-        cb.reg.vstore(res, 0, acc, cb.reg.full_mask())
+    with vf(mode="simd"):
+        m = create_mask(pattern="vl32", elem_bits=32)
+        zero = vdups(0.0, dtypes.float32)
+        acc = vselect(vload(in0, 0), zero, cond_mask=m)
+        vstore(res, 0, acc, full_mask())
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    create_mask_kernel[1](src0, dst)
+    _create_mask_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    expected = torch.cat([src0.cpu()[:32], torch.zeros(32)])
+    torch.testing.assert_close(dst.cpu(), expected)
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-expected = torch.cat([src0.cpu()[:32], torch.zeros(32)])
-torch.testing.assert_close(dst.cpu(), expected)
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

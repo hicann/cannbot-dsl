@@ -67,7 +67,7 @@ def vstore_unalign(tensor, offset, value: RawVReg, ureg: StoreUnalignReg) -> Non
 
 ### 指令约束
 
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 每组连续搬出操作开始前，需调用一次`vsqueeze_and_storeunalign_init`和一次`vstore_unalign_begin`。连续调用本接口时，需保持`tensor`和`ureg`不变；最后一次调用后，需调用一次`vsqueeze_and_storeunalign_finalize`完成收尾。
 
 ## 调用示例
@@ -80,44 +80,57 @@ def vstore_unalign(tensor, offset, value: RawVReg, ureg: StoreUnalignReg) -> Non
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import (
+    create_mask,
+    vload,
+    vsqueeze_and_storeunalign_finalize,
+    vsqueeze_and_storeunalign_init,
+    vstore_unalign,
+    vstore_unalign_begin,
+)
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vstore_unalign_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vstore_unalign_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="m3", elem_bits=32)
-        sq = cb.reg.vsqueeze_and_storeunalign_init(cb.reg.vload(in0, 0), mask=mask)
-        ureg = cb.reg.vstore_unalign_begin(res)
-        cb.reg.vstore_unalign(res, 0, sq, ureg)
-        cb.reg.vsqueeze_and_storeunalign_finalize(res, 0, ureg)
+    with vf(mode="simd"):
+        mask = create_mask(pattern="m3", elem_bits=32)
+        sq = vsqueeze_and_storeunalign_init(vload(in0, 0), mask=mask)
+        ureg = vstore_unalign_begin(res)
+        vstore_unalign(res, 0, sq, ureg)
+        vsqueeze_and_storeunalign_finalize(res, 0, ureg)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vstore_unalign_kernel[1](src0, dst)
+    _vstore_unalign_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu()[:22], src0.cpu()[0::3])
+    print("vstore_unalign example passed")
+    print(f"first={float(dst.cpu()[0]):.1f}, last={float(dst.cpu()[21]):.1f}")
 
-torch.testing.assert_close(dst.cpu()[:22], src0.cpu()[0::3])
-print("vstore_unalign example passed")
-print(f"first={float(dst.cpu()[0]):.1f}, last={float(dst.cpu()[21]):.1f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

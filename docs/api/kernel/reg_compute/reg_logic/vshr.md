@@ -65,7 +65,7 @@ def vshr(src: RawVReg, shift_bits: int, *, mask: Mask) -> RawVReg: ...
 
 ### 通用约束
 
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
 - 掩码位为0的元素位置不参与右移运算，输出结果对应位置写0。
 
@@ -89,41 +89,47 @@ python vshr.py
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vshr, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vshr_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vshr_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src)
+    mem_copy(buf.produce(), src)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vstore(res, 0, cb.reg.vshr(cb.reg.vload(in0, 0), 2, mask=mask), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vstore(res, 0, vshr(vload(in0, 0), 2, mask=mask), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    vshr_kernel[1](src, dst)
+    _vshr_kernel[1](src, dst)
 
+def main():
+    src = torch.arange(64, dtype=torch.int32, device="npu:0")
+    dst = torch.empty_like(src)
 
-src = torch.arange(64, dtype=torch.int32, device="npu:0")
-dst = torch.empty_like(src)
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), (src >> 2).cpu())
+    print("vshr example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-torch.testing.assert_close(dst.cpu(), (src >> 2).cpu())
-print("vshr example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

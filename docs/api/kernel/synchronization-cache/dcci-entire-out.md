@@ -50,27 +50,34 @@ def dcci_entire_out() -> None: ...
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(output):
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.sync import dcci_entire_out
+
+@kernel
+def _kernel(output):
     output[0] = 7
     output[32] = 9
-    cb.dcci_entire_out()
+    dcci_entire_out()
 
-@cb.jit
+@host
 def run(output):
-    kernel[1](output)
+    _kernel[1](output)
 
-output = torch.zeros(64, dtype=torch.int32, device="npu")
-run(output)
-torch.npu.synchronize()
-values = output.cpu()[[0, 32]].tolist()
-assert values == [7, 9]
-print(f"output values: {values}")
-print("dcci_entire_out example passed")
+def main():
+    output = torch.zeros(64, dtype=torch.int32, device="npu")
+    run(output)
+    torch.npu.synchronize()
+    values = output.cpu()[[0, 32]].tolist()
+    assert values == [7, 9]
+    print(f"output values: {values}")
+    print("dcci_entire_out example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

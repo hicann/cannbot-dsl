@@ -66,7 +66,7 @@ def vinterleave(src0, src1) -> tuple[RawVReg, RawVReg]: ...
 
 ### 寄存器约束
 
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `src0`和`src1`可以为同一个矢量数据寄存器或掩码寄存器。
 - `dst0`和`dst1`不能为同一个矢量数据寄存器或掩码寄存器。
 - 源操作数和目的操作数可以使用同一个矢量数据寄存器或掩码寄存器。
@@ -81,50 +81,56 @@ def vinterleave(src0, src1) -> tuple[RawVReg, RawVReg]: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vinterleave, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vinterleave_kernel(src0, src1, dst):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (128,), dst.dtype, depth=1)
+@kernel
+def _vinterleave_kernel(src0, src1, dst):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    out = Channel(MemLoc.UB, (128,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        low, high = cb.reg.vinterleave(cb.reg.vload(in0, 0), cb.reg.vload(in1, 0))
-        cb.reg.vstore(res, 0, low, mask)
-        cb.reg.vstore(res, 64, high, mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        low, high = vinterleave(vload(in0, 0), vload(in1, 0))
+        vstore(res, 0, low, mask)
+        vstore(res, 64, high, mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst):
-    vinterleave_kernel[1](src0, src1, dst)
+    _vinterleave_kernel[1](src0, src1, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    src1 = src0 + 100.0
+    dst = torch.empty((128,), dtype=torch.float32, device="npu:0")
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-src1 = src0 + 100.0
-dst = torch.empty((128,), dtype=torch.float32, device="npu:0")
+    run(src0, src1, dst)
+    torch.npu.synchronize()
 
-run(src0, src1, dst)
-torch.npu.synchronize()
+    a, b = src0.cpu(), src1.cpu()
+    expected = torch.cat([torch.stack([a[:32], b[:32]], 1).flatten(),
+                          torch.stack([a[32:], b[32:]], 1).flatten()])
+    torch.testing.assert_close(dst.cpu(), expected)
+    print("vinterleave example passed")
+    print(f"first={float(dst.cpu()[0]):.1f}, last={float(dst.cpu()[-1]):.1f}")
 
-a, b = src0.cpu(), src1.cpu()
-expected = torch.cat([torch.stack([a[:32], b[:32]], 1).flatten(),
-                      torch.stack([a[32:], b[32:]], 1).flatten()])
-torch.testing.assert_close(dst.cpu(), expected)
-print("vinterleave example passed")
-print(f"first={float(dst.cpu()[0]):.1f}, last={float(dst.cpu()[-1]):.1f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

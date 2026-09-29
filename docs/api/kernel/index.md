@@ -15,6 +15,7 @@ Kernel API 面向 AI Core，在 `@kernel` 函数体或其展开的设备侧辅�
 | [原子操作](/api/kernel/atomic/) | GM 地址上的单点原子计算操作，多个 AI Core 的操作串行化执行（绕过 DCache） | `atomic_add`、`atomic_cas`、`atomic_inc` 等 |
 | [矩阵计算](/api/kernel/cube_compute/) | Mmad 矩阵乘加与 HF32/HiF8/FP8 计算模式配置 | `matmul`、`enable_hf32`、`set_mmad_direction` 等 |
 | [同步与缓存控制](/api/kernel/synchronization-cache/) | Cube、Vector、全局同步和缓存维护 | [`dcci_single`](/api/kernel/synchronization-cache/dcci-single)、[`dcci_entire_out`](/api/kernel/synchronization-cache/dcci-entire-out)、[`dcci_entire_atomic`](/api/kernel/synchronization-cache/dcci-entire-atomic)、[`dci`](/api/kernel/synchronization-cache/dci) |
+| [同步管理](/api/kernel/resource-management/) | 核间同步 | [核间同步接口](/api/kernel/resource-management/)（[`cube_sync_block_arrive`](/api/kernel/resource-management/cube-sync-block-arrive)、[`global_sync_all`](/api/kernel/resource-management/global-sync-all) 等 9 个） |
 | [系统变量访问](/api/kernel/system/) | block、物理核、子核、周期和状态查询 | [`get_block_idx`](/api/kernel/system/get-block-idx)、[`get_block_num`](/api/kernel/system/get-block-num)、[`get_core_id`](/api/kernel/system/get-core-id) 等 |
 | 资源管理 | 统一缓冲区（UB）、Buffer、Channel 和延迟线 | `UB`、`make_buffer`、`make_channel`、`DelayLine` |
 | 分布式通信 | 通信上下文、通信引擎和设备地址 | `distributed.get_comm_context`、`distributed.CommEngine` 等 |

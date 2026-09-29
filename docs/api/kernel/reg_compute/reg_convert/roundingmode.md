@@ -301,43 +301,49 @@ RoundingMode.RO
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import PackMode, RoundingMode, create_mask, vcast, vload, vstore_pack
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def rounding_mode_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _rounding_mode_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src)
+    mem_copy(buf.produce(), src)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="all", elem_bits=32)
-        h = cb.reg.vcast(cb.reg.vload(in0, 0), cb.dtypes.float16, mask=mask,
-                         rounding=cb.reg.RoundingMode.RN)
-        cb.reg.vstore_pack(res, 0, h, mask, pack_mode=cb.reg.PackMode.B32_TO_B16)
+    with vf(mode="simd"):
+        mask = create_mask(pattern="all", elem_bits=32)
+        h = vcast(vload(in0, 0), dtypes.float16, mask=mask,
+                         rounding=RoundingMode.RN)
+        vstore_pack(res, 0, h, mask, pack_mode=PackMode.B32_TO_B16)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    rounding_mode_kernel[1](src, dst)
+    _rounding_mode_kernel[1](src, dst)
 
+def main():
+    src = (torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0) / 8.0
+    dst = torch.empty((64,), dtype=torch.float16, device="npu:0")
 
-src = (torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0) / 8.0
-dst = torch.empty((64,), dtype=torch.float16, device="npu:0")
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), src.cpu().half())
+    print("RoundingMode example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), src.cpu().half())
-print("RoundingMode example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

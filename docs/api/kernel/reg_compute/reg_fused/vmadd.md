@@ -73,50 +73,56 @@ def vmadd(lhs: RawVReg, rhs: RawVReg, addend: RawVReg, *, mask: Mask) -> RawVReg
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vmadd, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vmadd_kernel(src0, src1, src2, dst):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    buf2 = cb.Channel(cb.MemLoc.UB, (64,), src2.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vmadd_kernel(src0, src1, src2, dst):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    buf2 = Channel(MemLoc.UB, (64,), src2.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
-    cb.mem_copy(buf2.produce(), src2)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
+    mem_copy(buf2.produce(), src2)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     in2 = buf2.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        r = cb.reg.vmadd(cb.reg.vload(in0, 0), cb.reg.vload(in1, 0), cb.reg.vload(in2, 0), mask=mask)
-        cb.reg.vstore(res, 0, r, mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        r = vmadd(vload(in0, 0), vload(in1, 0), vload(in2, 0), mask=mask)
+        vstore(res, 0, r, mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, src2, dst):
-    vmadd_kernel[1](src0, src1, src2, dst)
+    _vmadd_kernel[1](src0, src1, src2, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0") / 8.0
+    src1 = torch.arange(64, dtype=torch.float32, device="npu:0") / 16.0
+    src2 = torch.arange(64, dtype=torch.float32, device="npu:0") / 32.0
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0") / 8.0
-src1 = torch.arange(64, dtype=torch.float32, device="npu:0") / 16.0
-src2 = torch.arange(64, dtype=torch.float32, device="npu:0") / 32.0
-dst = torch.empty_like(src0)
+    run(src0, src1, src2, dst)
+    torch.npu.synchronize()
 
-run(src0, src1, src2, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), (src0 * src1 + src2).cpu())
+    print("vmadd example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), (src0 * src1 + src2).cpu())
-print("vmadd example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

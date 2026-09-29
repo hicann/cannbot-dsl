@@ -62,31 +62,35 @@ def load_bypass(ptr) -> ScalarValue: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import load_bypass, vec_store_bypass
 
-@cb.kernel
-def load_bypass_kernel(src, dst):
-    cb.scalar.vec_store_bypass(dst.ptr(0), cb.scalar.load_bypass(src.ptr(0)))
+@kernel
+def _load_bypass_kernel(src, dst):
+    vec_store_bypass(dst.ptr(0), load_bypass(src.ptr(0)))
 
-
-@cb.jit
+@host
 def run(src, dst):
-    load_bypass_kernel[1](src, dst)
+    _load_bypass_kernel[1](src, dst)
 
+def main():
+    src = torch.full((1,), 42, dtype=torch.int32, device="npu:0")
+    dst = torch.zeros((1,), dtype=torch.int32, device="npu:0")
 
-src = torch.full((1,), 42, dtype=torch.int32, device="npu:0")
-dst = torch.zeros((1,), dtype=torch.int32, device="npu:0")
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    result = int(dst.cpu()[0])
+    assert result == 42, result
+    print("load_bypass example passed")
+    print(f"loaded={result}")
 
-result = int(dst.cpu()[0])
-assert result == 42, result
-print("load_bypass example passed")
-print(f"loaded={result}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

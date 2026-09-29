@@ -24,7 +24,7 @@ since: 待追溯
 
 ## 功能说明
 
-对输入矢量数据寄存器中的元素进行累计频率统计，生成累计直方图。统计结果在目的矢量数据寄存器原有数据基础上累加。支持配置掩码用于指示参与统计的元素，掩码位为1时，对应元素参与统计；为0时不统计。掩码不影响目的矢量数据寄存器的写入行为。本接口需在`cb.vf()`作用域内调用。
+对输入矢量数据寄存器中的元素进行累计频率统计，生成累计直方图。统计结果在目的矢量数据寄存器原有数据基础上累加。支持配置掩码用于指示参与统计的元素，掩码位为1时，对应元素参与统计；为0时不统计。掩码不影响目的矢量数据寄存器的写入行为。本接口需在VF作用域内调用。
 
 由于源矢量数据寄存器`src`的数据类型为`dtypes.uint8`，取值范围为[0, 255]，而目的矢量数据寄存器`acc`的元素类型为`dtypes.uint16`，且一个Vector Length可存储128个`dtypes.uint16`数据，因此本接口支持以下两种模式，其中n为`acc`的元素索引，n ∈ {0, 1, ..., 127}：
 
@@ -66,7 +66,7 @@ def vhistogram_accumulate(acc: RawVReg, src: RawVReg, *, mask: Mask, bin: int=0)
 
 ### 通用约束
 
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `mask`需通过掩码设置接口预先赋值后再传入；未赋值的掩码寄存器内容不确定，会导致参与统计的元素位置错误。
 
 ### 计算约束
@@ -85,46 +85,52 @@ def vhistogram_accumulate(acc: RawVReg, src: RawVReg, *, mask: Mask, bin: int=0)
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, vdups, vhistogram_accumulate, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vhistogram_accumulate_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, shape=(256,), dtype=src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, shape=(128,), dtype=cb.dtypes.uint16, depth=1)
+@kernel
+def _vhistogram_accumulate_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, shape=(256,), dtype=src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, shape=(128,), dtype=dtypes.uint16, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     src = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        src_mask = cb.reg.create_mask(pattern="all", elem_bits=8)
-        dst_mask = cb.reg.create_mask(pattern="all", elem_bits=16)
-        acc = cb.reg.vdups(0, cb.dtypes.uint16, mask=dst_mask)
-        hist = cb.reg.vhistogram_accumulate(acc, cb.reg.vload(src, 0), mask=src_mask)
-        cb.reg.vstore(res, 0, hist, dst_mask)
+    with vf(mode="simd"):
+        src_mask = create_mask(pattern="all", elem_bits=8)
+        dst_mask = create_mask(pattern="all", elem_bits=16)
+        acc = vdups(0, dtypes.uint16, mask=dst_mask)
+        hist = vhistogram_accumulate(acc, vload(src, 0), mask=src_mask)
+        vstore(res, 0, hist, dst_mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vhistogram_accumulate_kernel[1](src0, dst)
+    _vhistogram_accumulate_kernel[1](src0, dst)
 
+def main():
+    src0 = (torch.arange(256, dtype=torch.int64) % 32).to(torch.uint8).to("npu:0")
+    dst = torch.empty((128,), dtype=torch.uint16).to("npu:0")
 
-src0 = (torch.arange(256, dtype=torch.int64) % 32).to(torch.uint8).to("npu:0")
-dst = torch.empty((128,), dtype=torch.uint16).to("npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    values = torch.arange(256, dtype=torch.int64) % 32
+    expected = torch.cumsum(torch.bincount(values, minlength=128), dim=0).to(torch.int32)
+    torch.testing.assert_close(dst.cpu().to(torch.int32), expected)
+    print("vhistogram_accumulate example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-values = torch.arange(256, dtype=torch.int64) % 32
-expected = torch.cumsum(torch.bincount(values, minlength=128), dim=0).to(torch.int32)
-torch.testing.assert_close(dst.cpu().to(torch.int32), expected)
-print("vhistogram_accumulate example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

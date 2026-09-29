@@ -74,30 +74,33 @@ dtype支持的数据类型为`dtypes.int32`、`dtypes.uint32`、`dtypes.float32`
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
-from cannbotdsl import dtypes
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import dtypes, host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import atomic_cas
 
-@cb.kernel
-def atomic_cas_kernel(target):
+@kernel
+def _atomic_cas_kernel(target):
     # 旧值为 5 时交换为 9；第二次调用的旧值已是 9，不满足条件，保持 9 不变
-    cb.scalar.atomic_cas(target.ptr(0), dtypes.int32(5), dtypes.int32(9))
-    cb.scalar.atomic_cas(target.ptr(0), dtypes.int32(5), dtypes.int32(7))
+    atomic_cas(target.ptr(0), dtypes.int32(5), dtypes.int32(9))
+    atomic_cas(target.ptr(0), dtypes.int32(5), dtypes.int32(7))
 
-
-@cb.jit
+@host
 def run(target):
-    atomic_cas_kernel[1](target)
+    _atomic_cas_kernel[1](target)
 
+def main():
+    target = torch.full((1,), 5, dtype=torch.int32, device="npu:0")
+    run(target)
+    torch.npu.synchronize()
 
-target = torch.full((1,), 5, dtype=torch.int32, device="npu:0")
-run(target)
-torch.npu.synchronize()
+    assert target.cpu().tolist() == [9], target.cpu().tolist()
+    print(f"atomic_cas example passed, target={target.cpu().tolist()}")
 
-assert target.cpu().tolist() == [9], target.cpu().tolist()
-print(f"atomic_cas example passed, target={target.cpu().tolist()}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

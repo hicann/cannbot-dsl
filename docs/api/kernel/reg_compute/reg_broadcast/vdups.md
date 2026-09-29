@@ -57,7 +57,7 @@ dtype支持的数据类型为`dtypes.int8`、`dtypes.uint8`、`dtypes.float8_e8m
 ## 约束说明
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 同一寄存器的数据依赖由硬件保序，无需额外插入同步指令。本接口与前后Reg数据搬运接口之间，如果不同寄存器访问同一Unified Buffer（UB）地址且存在写后读或写后写依赖，需要调用[vmem_bar](../reg_sync/vmem-bar.md)进行同步。
 - 使用`mask`前，需要通过掩码设置或搬入接口完成初始化；未初始化的掩码寄存器内容不确定。
 
@@ -71,34 +71,40 @@ dtype支持的数据类型为`dtypes.int8`、`dtypes.uint8`、`dtypes.float8_e8m
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vdups, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vdups_kernel(dst):
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vdups_kernel(dst):
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
     res = out.produce()
-    with cb.vf(mode="simd"):
-        acc = cb.reg.vdups(3.5, cb.dtypes.float32)
-        cb.reg.vstore(res, 0, acc, cb.reg.full_mask())
+    with vf(mode="simd"):
+        acc = vdups(3.5, dtypes.float32)
+        vstore(res, 0, acc, full_mask())
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(dst):
-    vdups_kernel[1](dst)
+    _vdups_kernel[1](dst)
 
+def main():
+    dst = torch.empty((64,), dtype=torch.float32, device="npu:0")
 
-dst = torch.empty((64,), dtype=torch.float32, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), torch.full((64,), 3.5))
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), torch.full((64,), 3.5))
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

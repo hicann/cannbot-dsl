@@ -85,7 +85,7 @@ def vgather(tensor, index: RawVReg, *, mask: Mask) -> RawVReg: ...
 
 ### 通用约束
 
-- 本接口需在`cb.vf()`作用域内调用，源操作数为UB地址、收集结果为矢量数据寄存器。
+- 本接口需在VF作用域内调用，源操作数为UB地址、收集结果为矢量数据寄存器。
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
 
 ### UB源收集模式约束
@@ -112,46 +112,52 @@ def vgather(tensor, index: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vgather, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vgather_kernel(src0, index, dst):
-    buf = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=src0.dtype, depth=1)
-    idx = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=cb.dtypes.uint32, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=dst.dtype, depth=1)
+@kernel
+def _vgather_kernel(src0, index, dst):
+    buf = Channel(MemLoc.UB, shape=(64,), dtype=src0.dtype, depth=1)
+    idx = Channel(MemLoc.UB, shape=(64,), dtype=dtypes.uint32, depth=1)
+    out = Channel(MemLoc.UB, shape=(64,), dtype=dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
-    cb.mem_copy(idx.produce(), index)
+    mem_copy(buf.produce(), src0)
+    mem_copy(idx.produce(), index)
 
     src = buf.consume()
     ind = idx.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        gathered = cb.reg.vgather(src, cb.reg.vload(ind, 0), mask=mask)
-        cb.reg.vstore(res, 0, gathered, mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        gathered = vgather(src, vload(ind, 0), mask=mask)
+        vstore(res, 0, gathered, mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, index, dst):
-    vgather_kernel[1](src0, index, dst)
+    _vgather_kernel[1](src0, index, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.int32, device="npu:0") * 10
+    index = torch.arange(63, -1, -1, dtype=torch.int32, device="npu:0").view(torch.uint32)
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.int32, device="npu:0") * 10
-index = torch.arange(63, -1, -1, dtype=torch.int32, device="npu:0").view(torch.uint32)
-dst = torch.empty_like(src0)
+    run(src0, index, dst)
+    torch.npu.synchronize()
 
-run(src0, index, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), src0.cpu()[index.cpu().to(torch.int32)])
+    print("vgather example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-torch.testing.assert_close(dst.cpu(), src0.cpu()[index.cpu().to(torch.int32)])
-print("vgather example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

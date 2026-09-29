@@ -61,7 +61,7 @@ dtype支持的数据类型为`int4b_t`、`dtypes.int8`、`dtypes.uint8`、`dtype
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
 - 实际读取地址必须按32字节对齐，且有效`DataBlock`的读取范围必须在UB地址空间内且不越界，否则会报错。
 - 当一个`DataBlock`中的元素全部被`mask`设置为无效时，该`DataBlock`即使越界也不会报错。
@@ -82,43 +82,49 @@ dtype支持的数据类型为`int4b_t`、`dtypes.int8`、`dtypes.uint8`、`dtype
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload_strided, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vload_strided_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (128,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vload_strided_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (128,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        r = cb.reg.vload_strided(in0, 0, mask, block_stride=2, repeat_stride=1)
-        cb.reg.vstore(res, 0, r, mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        r = vload_strided(in0, 0, mask, block_stride=2, repeat_stride=1)
+        vstore(res, 0, r, mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vload_strided_kernel[1](src0, dst)
+    _vload_strided_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(128, dtype=torch.float32, device="npu:0")
+    dst = torch.empty((64,), dtype=torch.float32, device="npu:0")
 
-src0 = torch.arange(128, dtype=torch.float32, device="npu:0")
-dst = torch.empty((64,), dtype=torch.float32, device="npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    # 每个DataBlock为8个元素，搬入步长为2、起始偏移为1个DataBlock，即取第1、3、…、15个DataBlock
+    torch.testing.assert_close(dst.cpu(), src0.cpu().view(16, 8)[1::2].reshape(-1))
+    print("vload_strided example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-# 每个DataBlock为8个元素，搬入步长为2、起始偏移为1个DataBlock，即取第1、3、…、15个DataBlock
-torch.testing.assert_close(dst.cpu(), src0.cpu().view(16, 8)[1::2].reshape(-1))
-print("vload_strided example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

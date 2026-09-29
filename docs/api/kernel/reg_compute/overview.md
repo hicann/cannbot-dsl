@@ -12,7 +12,7 @@ Reg矢量计算接口提供面向 Reg 矢量计算架构的寄存器级矢量计
 
 以调用示例为例，完整的 Vector Function 计算过程由以下几部分组成：
 
-- 编写和调用 Vector Function。Vector Function 使用 `with cb.vf(mode="simd"):` 作用域定义，可在核函数中调用；
+- 编写和调用 Vector Function。Vector Function 在VF作用域中定义，可在核函数中调用；
 - 定义矢量数据寄存器（`RawVReg`）、掩码寄存器（`Mask`）；
 - 编写循环处理多个 VL 长度的数据；[`update_mask`](/api/kernel/reg_compute/reg_mask/update-mask) 系列接口用于更新参与计算的 mask，每次循环都会消耗一个 VL 长度的元素；
 - 循环内调用 Reg 数据搬入接口连续对齐搬入（[`vload`](/api/kernel/reg_compute/load/vload)）从 UB 中搬入单个 VL 长度数据；
@@ -29,49 +29,55 @@ Reg矢量计算接口提供面向 Reg 矢量计算架构的寄存器级矢量计
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import update_mask, vadd, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def reg_add_kernel(src0, src1, dst):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _reg_add_kernel(src0, src1, dst):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
     # GM 数据搬运至 UB
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     res = out.produce()
     # Vector Function：更新 mask、搬入、计算、搬出
-    with cb.vf(mode="simd"):
-        mask, _ = cb.reg.update_mask(64, 32)
-        acc = cb.reg.vadd(cb.reg.vload(in0, 0), cb.reg.vload(in1, 0), mask=mask)
-        cb.reg.vstore(res, 0, acc, mask)
+    with vf(mode="simd"):
+        mask, _ = update_mask(64, 32)
+        acc = vadd(vload(in0, 0), vload(in1, 0), mask=mask)
+        vstore(res, 0, acc, mask)
 
     # UB 数据搬运至 GM
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst):
-    reg_add_kernel[1](src0, src1, dst)
+    _reg_add_kernel[1](src0, src1, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    src1 = torch.arange(64, dtype=torch.float32, device="npu:0") + 1.0
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-src1 = torch.arange(64, dtype=torch.float32, device="npu:0") + 1.0
-dst = torch.empty_like(src0)
+    run(src0, src1, dst)
+    torch.npu.synchronize()
 
-run(src0, src1, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), (src0 + src1).cpu())
+    print("reg compute example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), (src0 + src1).cpu())
-print("reg compute example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果
@@ -86,5 +92,5 @@ first=1.0000, last=127.0000
 - GM 与 UB 间的数据搬运需通过 [`mem_copy`](/api/kernel/data-movement/mem-copy) 完成。
 - Vector Function 的流水类型为 `PIPE_V`，Vector Function 内部如存在 UB 地址重叠或跨流水依赖，需要根据具体接口约束插入 [`vmem_bar`](/api/kernel/reg_compute/reg_sync/vmem-bar)。
 - Reg矢量计算接口仅在 AIV 上生效，在非 AIV 上调用时不执行计算。
-- Reg矢量计算接口需要在 Vector Function（`with cb.vf(mode="simd"):` 作用域）内调用，不支持在核函数中直接调用。
+- Reg矢量计算接口需要在VF作用域内调用，不支持在核函数中直接调用。
 - 对于支持配置 `mask` 参数的 Reg矢量计算接口，`mask` 需通过[掩码寄存器操作](/api/kernel/reg_compute/reg_mask/)接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。

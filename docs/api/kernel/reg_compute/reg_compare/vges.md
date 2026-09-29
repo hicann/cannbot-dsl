@@ -77,40 +77,46 @@ def vges(src: RawVReg, scalar, *, mask: Mask) -> Mask: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vdups, vges, vload, vselect, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vges_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
-    cb.mem_copy(buf.produce(), src)
+@kernel
+def _vges_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
+    mem_copy(buf.produce(), src)
 
     in0, res = buf.consume(), out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        pred = cb.reg.vges(cb.reg.vload(in0, 0), 32.0, mask=mask)
-        r = cb.reg.vselect(cb.reg.vdups(1.0, cb.dtypes.float32),
-                           cb.reg.vdups(0.0, cb.dtypes.float32), cond_mask=pred)
-        cb.reg.vstore(res, 0, r, mask)
-    cb.mem_copy(dst, out.consume())
+    with vf(mode="simd"):
+        mask = full_mask()
+        pred = vges(vload(in0, 0), 32.0, mask=mask)
+        r = vselect(vdups(1.0, dtypes.float32),
+                           vdups(0.0, dtypes.float32), cond_mask=pred)
+        vstore(res, 0, r, mask)
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    vges_kernel[1](src, dst)
+    _vges_kernel[1](src, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), (src0 >= 32.0).float().cpu())
+    print(f"count={int(dst.sum().item())}")
 
-torch.testing.assert_close(dst.cpu(), (src0 >= 32.0).float().cpu())
-print(f"count={int(dst.sum().item())}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

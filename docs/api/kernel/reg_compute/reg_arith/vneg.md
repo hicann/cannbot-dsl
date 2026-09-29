@@ -60,7 +60,7 @@ def vneg(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 ## 约束说明
 
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
-- 本接口需在`cb.vf()`作用域内调用，`src`为矢量数据寄存器。
+- 本接口需在VF作用域内调用，`src`为矢量数据寄存器。
 - `mask`比特位为0时，计算结果对应比特位写0。
 - 整数输入为有符号整数类型的最小负值时，结果保留原值不变。
 - 浮点输入通过翻转符号位实现取反：正数变为对应负数，负数变为对应正数，+0.0变为-0.0，-0.0变为+0.0，+inf变为-inf，-inf变为+inf。
@@ -76,41 +76,47 @@ def vneg(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vneg, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vneg_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vneg_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src)
+    mem_copy(buf.produce(), src)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vstore(res, 0, cb.reg.vneg(cb.reg.vload(in0, 0), mask=mask), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vstore(res, 0, vneg(vload(in0, 0), mask=mask), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    vneg_kernel[1](src, dst)
+    _vneg_kernel[1](src, dst)
 
+def main():
+    src = torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0
+    dst = torch.zeros_like(src)
 
-src = torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0
-dst = torch.zeros_like(src)
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), (-src).cpu())
+    print("vneg example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), (-src).cpu())
-print("vneg example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

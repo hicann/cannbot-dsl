@@ -72,38 +72,47 @@ def set_mmad_direction(direction: Literal['m', 'n']) -> None: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
-@cb.kernel
-def set_mmad_direction_kernel(a, b, c):
-    l1a = cb.Channel(cb.MemLoc.L1, shape=(16, 16), dtype=cb.dtypes.float16, depth=1)
-    l1b = cb.Channel(cb.MemLoc.L1, shape=(16, 16), dtype=cb.dtypes.float16, depth=1)
-    l0a = cb.Channel(cb.MemLoc.L0A, shape=(16, 16), dtype=cb.dtypes.float16, depth=1)
-    l0b = cb.Channel(cb.MemLoc.L0B, shape=(16, 16), dtype=cb.dtypes.float16, depth=1)
-    l0c = cb.Channel(cb.MemLoc.L0C, shape=(16, 16), dtype=cb.dtypes.float32, depth=1)
-    cb.mem_copy(l1a.produce(), a, engine=cb.make_copy_engine(format_transform="nd2nz"))
-    cb.mem_copy(l1b.produce(), b, engine=cb.make_copy_engine(format_transform="nd2nz"))
-    cb.cube.set_mmad_direction("m")
-    cb.mem_copy(l0a.produce(), l1a.consume())
-    cb.mem_copy(l0b.produce(), l1b.consume())
-    cb.matmul(l0c.produce(), l0a.consume(), l0b.consume(), init=True)
-    cb.mem_copy(c, l0c.consume())
+from cannbotdsl import Channel, dtypes, host, make_copy_engine, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.cube import set_mmad_direction
+from cannbotdsl.ops.matmul import matmul
+from cannbotdsl.tensor import MemLoc
 
-@cb.jit
+@kernel
+def _set_mmad_direction_kernel(a, b, c):
+    l1a = Channel(MemLoc.L1, shape=(16, 16), dtype=dtypes.float16, depth=1)
+    l1b = Channel(MemLoc.L1, shape=(16, 16), dtype=dtypes.float16, depth=1)
+    l0a = Channel(MemLoc.L0A, shape=(16, 16), dtype=dtypes.float16, depth=1)
+    l0b = Channel(MemLoc.L0B, shape=(16, 16), dtype=dtypes.float16, depth=1)
+    l0c = Channel(MemLoc.L0C, shape=(16, 16), dtype=dtypes.float32, depth=1)
+    mem_copy(l1a.produce(), a, engine=make_copy_engine(format_transform="nd2nz"))
+    mem_copy(l1b.produce(), b, engine=make_copy_engine(format_transform="nd2nz"))
+    set_mmad_direction("m")
+    mem_copy(l0a.produce(), l1a.consume())
+    mem_copy(l0b.produce(), l1b.consume())
+    matmul(l0c.produce(), l0a.consume(), l0b.consume(), init=True)
+    mem_copy(c, l0c.consume())
+
+@host
 def run(a, b, c):
-    set_mmad_direction_kernel[1](a, b, c)
+    _set_mmad_direction_kernel[1](a, b, c)
 
-a = torch.arange(256, dtype=torch.float16, device="npu:0").reshape(16, 16) / 16.0
-b = a.clone()
-c = torch.empty((16, 16), dtype=torch.float32, device="npu:0")
-run(a, b, c)
-torch.npu.synchronize()
+def main():
+    a = torch.arange(256, dtype=torch.float16, device="npu:0").reshape(16, 16) / 16.0
+    b = a.clone()
+    c = torch.empty((16, 16), dtype=torch.float32, device="npu:0")
+    run(a, b, c)
+    torch.npu.synchronize()
 
-# 本接口只改变L0C Buffer上结果分形的生成顺序，不改变计算结果，此处以一次矩阵乘加验证配置调用已生效。
-torch.testing.assert_close(c.cpu(), a.cpu().float() @ b.cpu().float().T, rtol=1e-2, atol=1e-2)
-print(f"first={c.cpu()[0, 0].item():.3f}, last={c.cpu()[-1, -1].item():.3f}")
+    # 本接口只改变L0C Buffer上结果分形的生成顺序，不改变计算结果，此处以一次矩阵乘加验证配置调用已生效。
+    torch.testing.assert_close(c.cpu(), a.cpu().float() @ b.cpu().float().T, rtol=1e-2, atol=1e-2)
+    print(f"first={c.cpu()[0, 0].item():.3f}, last={c.cpu()[-1, -1].item():.3f}")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

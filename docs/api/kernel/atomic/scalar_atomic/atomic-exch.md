@@ -67,29 +67,32 @@ dtype支持的数据类型为`dtypes.int32`、`dtypes.uint32`、`dtypes.float32`
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
-from cannbotdsl import dtypes
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import dtypes, host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import atomic_exch
 
-@cb.kernel
-def atomic_exch_kernel(acc):
+@kernel
+def _atomic_exch_kernel(acc):
     # 用 7 替换 acc[0] 的旧值，返回值即被替换掉的旧值
-    cb.scalar.atomic_exch(acc.ptr(0), dtypes.int32(7))
+    atomic_exch(acc.ptr(0), dtypes.int32(7))
 
-
-@cb.jit
+@host
 def run(acc):
-    atomic_exch_kernel[1](acc)
+    _atomic_exch_kernel[1](acc)
 
+def main():
+    acc = torch.zeros(1, dtype=torch.int32, device="npu:0")
+    run(acc)
+    torch.npu.synchronize()
 
-acc = torch.zeros(1, dtype=torch.int32, device="npu:0")
-run(acc)
-torch.npu.synchronize()
+    assert acc.cpu().tolist() == [7], acc.cpu().tolist()
+    print(f"atomic_exch example passed, acc={acc.cpu().tolist()}")
 
-assert acc.cpu().tolist() == [7], acc.cpu().tolist()
-print(f"atomic_exch example passed, acc={acc.cpu().tolist()}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

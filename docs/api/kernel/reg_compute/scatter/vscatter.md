@@ -24,7 +24,7 @@ since: 待追溯
 
 ## 功能说明
 
-根据索引寄存器中的索引值，将源矢量数据寄存器中的元素分散搬出到Unified Buffer（UB）。`mask`用于指示参与搬出的元素，掩码为1的源元素写入`tensor`中对应索引位置，掩码为0的源元素不写入目的地址，保留目的地址原数据。搬运过程中数据格式与内容保持不变。本接口需在`cb.vf()`作用域内调用。
+根据索引寄存器中的索引值，将源矢量数据寄存器中的元素分散搬出到Unified Buffer（UB）。`mask`用于指示参与搬出的元素，掩码为1的源元素写入`tensor`中对应索引位置，掩码为0的源元素不写入目的地址，保留目的地址原数据。搬运过程中数据格式与内容保持不变。本接口需在VF作用域内调用。
 
 分散搬出过程如下图所示。
 
@@ -75,7 +75,7 @@ def vscatter(tensor, src: RawVReg, index: RawVReg, *, mask: Mask) -> None: ...
 
 ### 通用约束
 
-- 本接口需在`cb.vf()`作用域内调用，源操作数和索引为矢量数据寄存器，目的操作数为UB地址。
+- 本接口需在VF作用域内调用，源操作数和索引为矢量数据寄存器，目的操作数为UB地址。
 - `tensor`起始地址需32字节对齐。
 - UB容量上限为256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈和2KB 框架预留空间，可用248KB；SIMD与SIMT混合编程时再划分32KB～128KB作为Data Cache，可用容量进一步减少）。`index`索引后的实际写入地址不可超过实际可用容量。
 - `mask`需通过掩码设置接口预先赋值后再传入；未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
@@ -98,47 +98,53 @@ def vscatter(tensor, src: RawVReg, index: RawVReg, *, mask: Mask) -> None: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vscatter
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vscatter_kernel(src0, index, dst):
-    buf = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=src0.dtype, depth=1)
-    idx = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=cb.dtypes.uint32, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=dst.dtype, depth=1)
+@kernel
+def _vscatter_kernel(src0, index, dst):
+    buf = Channel(MemLoc.UB, shape=(64,), dtype=src0.dtype, depth=1)
+    idx = Channel(MemLoc.UB, shape=(64,), dtype=dtypes.uint32, depth=1)
+    out = Channel(MemLoc.UB, shape=(64,), dtype=dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
-    cb.mem_copy(idx.produce(), index)
+    mem_copy(buf.produce(), src0)
+    mem_copy(idx.produce(), index)
 
     src = buf.consume()
     ind = idx.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vscatter(res, cb.reg.vload(src, 0), cb.reg.vload(ind, 0), mask=mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vscatter(res, vload(src, 0), vload(ind, 0), mask=mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, index, dst):
-    vscatter_kernel[1](src0, index, dst)
+    _vscatter_kernel[1](src0, index, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.int32, device="npu:0") * 10
+    index = torch.arange(63, -1, -1, dtype=torch.int32, device="npu:0").view(torch.uint32)
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.int32, device="npu:0") * 10
-index = torch.arange(63, -1, -1, dtype=torch.int32, device="npu:0").view(torch.uint32)
-dst = torch.empty_like(src0)
+    run(src0, index, dst)
+    torch.npu.synchronize()
 
-run(src0, index, dst)
-torch.npu.synchronize()
+    expected = torch.zeros(64, dtype=torch.int32)
+    expected[index.cpu().to(torch.int64)] = src0.cpu()
+    torch.testing.assert_close(dst.cpu(), expected)
+    print("vscatter example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-expected = torch.zeros(64, dtype=torch.int32)
-expected[index.cpu().to(torch.int64)] = src0.cpu()
-torch.testing.assert_close(dst.cpu(), expected)
-print("vscatter example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

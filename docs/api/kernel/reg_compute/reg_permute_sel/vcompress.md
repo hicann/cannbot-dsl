@@ -56,7 +56,7 @@ def vcompress(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 ## 约束说明
 
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
-- 本接口需在`cb.vf()`作用域内调用，`src`为矢量数据寄存器。
+- 本接口需在VF作用域内调用，`src`为矢量数据寄存器。
 - `mask`比特位为1的`src`元素按原顺序紧凑排列到计算结果低位；`mask`比特位为0的`src`元素不参与压缩，计算结果中压缩结果之后的剩余高位统一写0。
 
 ## 调用示例
@@ -69,43 +69,49 @@ def vcompress(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, full_mask, vcompress, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vcompress_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vcompress_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="vl32", elem_bits=32)
-        cb.reg.vstore(res, 0, cb.reg.vcompress(cb.reg.vload(in0, 0), mask=mask), cb.reg.full_mask())
+    with vf(mode="simd"):
+        mask = create_mask(pattern="vl32", elem_bits=32)
+        vstore(res, 0, vcompress(vload(in0, 0), mask=mask), full_mask())
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vcompress_kernel[1](src0, dst)
+    _vcompress_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    expected = torch.zeros(64)
+    expected[:32] = src0.cpu()[:32]
+    torch.testing.assert_close(dst.cpu(), expected)
+    print("vcompress example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[31]):.4f}")
 
-expected = torch.zeros(64)
-expected[:32] = src0.cpu()[:32]
-torch.testing.assert_close(dst.cpu(), expected)
-print("vcompress example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[31]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

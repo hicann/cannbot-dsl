@@ -55,7 +55,7 @@ def vfloor(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 
 ## 约束说明
 
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
 - `dtypes.float16`和`dtypes.bfloat16`支持饱和模式。`dtypes.float32`类型只支持不饱和模式。
 - `mask`掩码位为0时，结果对应元素置0。
@@ -70,41 +70,47 @@ def vfloor(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vfloor, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vfloor_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vfloor_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src)
+    mem_copy(buf.produce(), src)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vstore(res, 0, cb.reg.vfloor(cb.reg.vload(in0, 0), mask=mask), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vstore(res, 0, vfloor(vload(in0, 0), mask=mask), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    vfloor_kernel[1](src, dst)
+    _vfloor_kernel[1](src, dst)
 
+def main():
+    src = (torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0) / 3.0
+    dst = torch.empty_like(src)
 
-src = (torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0) / 3.0
-dst = torch.empty_like(src)
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), torch.floor(src).cpu())
+    print("vfloor example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), torch.floor(src).cpu())
-print("vfloor example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

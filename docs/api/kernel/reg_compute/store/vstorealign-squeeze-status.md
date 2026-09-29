@@ -51,7 +51,7 @@ def vstorealign_squeeze_status(tensor, offset=0, *, post_update: bool=False) -> 
 ## 约束说明
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 实际目的地址需4字节对齐，且不得超出实际可用UB范围；无`offset`参数时实际目的地址为`tensor`，带`offset`参数时为`tensor`加`offset`个元素。
 - 调用本接口前，需使用[`vsqueeze_and_storeunalign`](../reg_permute_sel/vsqueeze-and-storeunalign.md)完成squeeze操作；写入的值是其当前累计的有效数据字节数。
 - 如果本接口与其他指令存在UB地址重叠，需要插入同步指令[`vmem_bar`](../reg_sync/vmem-bar.md)，保证多个指令串行化。
@@ -66,48 +66,61 @@ def vstorealign_squeeze_status(tensor, offset=0, *, post_update: bool=False) -> 
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import (
+    create_mask,
+    vload,
+    vsqueeze_and_storeunalign,
+    vsqueeze_and_storeunalign_init,
+    vstore_unalign_begin,
+    vstorealign_squeeze_status,
+)
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vstorealign_squeeze_status_kernel(src0, dst, status):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
-    st = cb.Channel(cb.MemLoc.UB, (1,), status.dtype, depth=1)
+@kernel
+def _vstorealign_squeeze_status_kernel(src0, dst, status):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
+    st = Channel(MemLoc.UB, (1,), status.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
     res2 = st.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="vl32", elem_bits=32)
-        ureg = cb.reg.vstore_unalign_begin(res)
-        sq = cb.reg.vsqueeze_and_storeunalign_init(cb.reg.vload(in0, 0), mask=mask)
-        cb.reg.vsqueeze_and_storeunalign(res, 0, sq, ureg)
-        cb.reg.vstorealign_squeeze_status(res2, 0)
+    with vf(mode="simd"):
+        mask = create_mask(pattern="vl32", elem_bits=32)
+        ureg = vstore_unalign_begin(res)
+        sq = vsqueeze_and_storeunalign_init(vload(in0, 0), mask=mask)
+        vsqueeze_and_storeunalign(res, 0, sq, ureg)
+        vstorealign_squeeze_status(res2, 0)
 
-    cb.mem_copy(dst, out.consume())
-    cb.mem_copy(status, st.consume())
+    mem_copy(dst, out.consume())
+    mem_copy(status, st.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst, status):
-    vstorealign_squeeze_status_kernel[1](src0, dst, status)
+    _vstorealign_squeeze_status_kernel[1](src0, dst, status)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
+    status = torch.zeros((1,), dtype=torch.int32, device="npu:0")
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
-status = torch.zeros((1,), dtype=torch.int32, device="npu:0")
+    run(src0, dst, status)
+    torch.npu.synchronize()
 
-run(src0, dst, status)
-torch.npu.synchronize()
+    assert int(status.cpu()[0]) == 128, f"squeeze status is not 128 bytes: {int(status.cpu()[0])}"
+    print("vstorealign_squeeze_status example passed")
+    print(f"status={int(status.cpu()[0])}, first={float(dst.cpu()[0]):.4f}")
 
-assert int(status.cpu()[0]) == 128, f"squeeze status is not 128 bytes: {int(status.cpu()[0])}"
-print("vstorealign_squeeze_status example passed")
-print(f"status={int(status.cpu()[0])}, first={float(dst.cpu()[0]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -15,7 +15,6 @@
 ## 接口
 
 - **[`enable_fp8`](/api/kernel/cube_compute/enable-fp8)**
-- **[`enable_hf32_trans`](/api/kernel/cube_compute/enable-hf32-trans)**
 - **[`enable_hf32`](/api/kernel/cube_compute/enable-hf32)**
 - **[`enable_hif8`](/api/kernel/cube_compute/enable-hif8)**
 - **[`matmul`](/api/kernel/cube_compute/matmul)**

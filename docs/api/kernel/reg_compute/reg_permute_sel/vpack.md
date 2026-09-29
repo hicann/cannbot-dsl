@@ -65,7 +65,7 @@ dtype_src与dtype_dst支持的数据类型对如下：
 
 ## 约束说明
 
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `src`与返回值均为矢量数据寄存器。
 
 ## 调用示例
@@ -78,41 +78,47 @@ dtype_src与dtype_dst支持的数据类型对如下：
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, vload, vpack, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vpack_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (128,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (128,), dst.dtype, depth=1)
+@kernel
+def _vpack_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (128,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (128,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="vl128", elem_bits=8)
-        cb.reg.vstore(res, 0, cb.reg.vpack(cb.reg.vload(in0, 0), cb.dtypes.uint8), mask)
+    with vf(mode="simd"):
+        mask = create_mask(pattern="vl128", elem_bits=8)
+        vstore(res, 0, vpack(vload(in0, 0), dtypes.uint8), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vpack_kernel[1](src0, dst)
+    _vpack_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(128, dtype=torch.int32).to(torch.uint16).to("npu:0")
+    dst = torch.empty((128,), dtype=torch.uint8, device="npu:0")
 
-src0 = torch.arange(128, dtype=torch.int32).to(torch.uint16).to("npu:0")
-dst = torch.empty((128,), dtype=torch.uint8, device="npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu().to(torch.int32), src0.cpu().to(torch.int32))
+    print("vpack example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-torch.testing.assert_close(dst.cpu().to(torch.int32), src0.cpu().to(torch.int32))
-print("vpack example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

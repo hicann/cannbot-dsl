@@ -50,25 +50,32 @@ def get_core_id() -> Int64: ...
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(output):
-    output[0] = cb.get_core_id()
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.arch import get_core_id
 
-@cb.jit
+@kernel
+def _kernel(output):
+    output[0] = get_core_id()
+
+@host
 def run(output):
-    kernel[1](output)
+    _kernel[1](output)
 
-output = torch.empty(1, dtype=torch.int64, device="npu")
-run(output)
-torch.npu.synchronize()
-core_id = int(output.cpu()[0])
-assert core_id >= 0
-print(f"core_id: {core_id}")
-print("get_core_id example passed")
+def main():
+    output = torch.empty(1, dtype=torch.int64, device="npu")
+    run(output)
+    torch.npu.synchronize()
+    core_id = int(output.cpu()[0])
+    assert core_id >= 0
+    print(f"core_id: {core_id}")
+    print("get_core_id example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

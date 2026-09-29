@@ -68,7 +68,7 @@ def vmem_bar(mode='vst_vld') -> None: ...
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 
 ### 指令约束
 
@@ -88,45 +88,51 @@ def vmem_bar(mode='vst_vld') -> None: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vmem_bar, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vmem_bar_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=src0.dtype, depth=1)
-    mid = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=dst.dtype, depth=1)
+@kernel
+def _vmem_bar_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, shape=(64,), dtype=src0.dtype, depth=1)
+    mid = Channel(MemLoc.UB, shape=(64,), dtype=src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, shape=(64,), dtype=dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     src = buf.consume()
     tmp = mid.produce()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vstore(tmp, 0, cb.reg.vload(src, 0), mask)
-        cb.reg.vmem_bar("vst_vld")
-        cb.reg.vstore(res, 0, cb.reg.vload(tmp, 0), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vstore(tmp, 0, vload(src, 0), mask)
+        vmem_bar("vst_vld")
+        vstore(res, 0, vload(tmp, 0), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vmem_bar_kernel[1](src0, dst)
+    _vmem_bar_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), src0.cpu())
+    print("vmem_bar example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), src0.cpu())
-print("vmem_bar example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -54,7 +54,7 @@ def vmask(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 ## 约束说明
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 未被`mask`筛选的位置值未定义：返回值对应的寄存器由本接口分配、未经初始化，调用方不应依赖未被`mask`筛选的位置的值。
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
 - `mask`的掩码位宽须与`src`的元素位宽一致（由掩码设置接口按`src`的元素位宽创建），否则有效元素位置错误。
@@ -69,43 +69,49 @@ def vmask(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, full_mask, vload, vmask, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vmask_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vmask_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src)
+    mem_copy(buf.produce(), src)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        full = cb.reg.full_mask()
-        half = cb.reg.create_mask(pattern="vl32")
-        cb.reg.vstore(res, 0, cb.reg.vmask(cb.reg.vload(in0, 0), mask=half), full)
+    with vf(mode="simd"):
+        full = full_mask()
+        half = create_mask(pattern="vl32")
+        vstore(res, 0, vmask(vload(in0, 0), mask=half), full)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    vmask_kernel[1](src, dst)
+    _vmask_kernel[1](src, dst)
 
+def main():
+    src = torch.arange(64, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src)
 
-src = torch.arange(64, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src)
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    # mask 未筛选的位置值未定义，仅校验已筛选的前32个元素。
+    torch.testing.assert_close(dst.cpu()[:32], src.cpu()[:32])
+    print("vmask example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, lane31={float(dst.cpu()[31]):.4f}")
 
-# mask 未筛选的位置值未定义，仅校验已筛选的前32个元素。
-torch.testing.assert_close(dst.cpu()[:32], src.cpu()[:32])
-print("vmask example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, lane31={float(dst.cpu()[31]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -63,7 +63,7 @@ def vselect(src_true: RawVReg, src_false: RawVReg, *, cond_mask: Mask) -> RawVRe
 ## 约束说明
 
 - `cond_mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `src_true`和`src_false`的数据类型需要保持一致。
 
 ## 调用示例
@@ -76,47 +76,53 @@ def vselect(src_true: RawVReg, src_false: RawVReg, *, cond_mask: Mask) -> RawVRe
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vgt, vload, vselect, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vselect_kernel(src0, src1, dst):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vselect_kernel(src0, src1, dst):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        a = cb.reg.vload(in0, 0)
-        b = cb.reg.vload(in1, 0)
-        cb.reg.vstore(res, 0, cb.reg.vselect(a, b, cond_mask=cb.reg.vgt(a, b, mask=mask)), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        a = vload(in0, 0)
+        b = vload(in1, 0)
+        vstore(res, 0, vselect(a, b, cond_mask=vgt(a, b, mask=mask)), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst):
-    vselect_kernel[1](src0, src1, dst)
+    _vselect_kernel[1](src0, src1, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0") * 2.0
+    src1 = torch.full((64,), 64.0, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0") * 2.0
-src1 = torch.full((64,), 64.0, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
+    run(src0, src1, dst)
+    torch.npu.synchronize()
 
-run(src0, src1, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), torch.where(src0.cpu() > src1.cpu(), src0.cpu(), src1.cpu()))
+    print("vselect example passed")
+    print(f"first={float(dst.cpu()[0]):.1f}, last={float(dst.cpu()[-1]):.1f}")
 
-torch.testing.assert_close(dst.cpu(), torch.where(src0.cpu() > src1.cpu(), src0.cpu(), src1.cpu()))
-print("vselect example passed")
-print(f"first={float(dst.cpu()[0]):.1f}, last={float(dst.cpu()[-1]):.1f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

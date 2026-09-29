@@ -65,7 +65,7 @@ dtype支持的数据类型为`int4b_t`、`dtypes.int8`、`dtypes.uint8`、`dtype
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `tensor`起始地址需32字节对齐，否则会报错。
 - UB容量上限为256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈+2KB 框架预留，可用248KB；SIMD+SIMT混编时再划分32KB~128KB作Data Cache，可用容量进一步减少）。目的操作数地址偏移后不可超过实际可用容量，否则会报错。
 - 如果本指令与其他指令存在UB地址重叠，需要插入同步指令[`vmem_bar`](../reg_sync/vmem-bar.md)，保证多个指令串行化，防止出现异常数据。
@@ -85,46 +85,52 @@ dtype支持的数据类型为`int4b_t`、`dtypes.int8`、`dtypes.uint8`、`dtype
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, full_mask, vdups, vload, vmem_bar, vstore, vstore_mask
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vstore_mask_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vstore_mask_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        full = cb.reg.full_mask()
-        part = cb.reg.create_mask(pattern="vl32", elem_bits=32)
-        cb.reg.vstore(res, 0, cb.reg.vdups(0.0, cb.dtypes.float32), full)
-        cb.reg.vmem_bar()
-        cb.reg.vstore_mask(res, 0, cb.reg.vload(in0, 0), part)
+    with vf(mode="simd"):
+        full = full_mask()
+        part = create_mask(pattern="vl32", elem_bits=32)
+        vstore(res, 0, vdups(0.0, dtypes.float32), full)
+        vmem_bar()
+        vstore_mask(res, 0, vload(in0, 0), part)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vstore_mask_kernel[1](src0, dst)
+    _vstore_mask_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(1, 65, dtype=torch.float32, device="npu:0")
+    dst = torch.empty_like(src0)
+    expected = src0.cpu().clone()
+    expected[32:] = 0.0
 
-src0 = torch.arange(1, 65, dtype=torch.float32, device="npu:0")
-dst = torch.empty_like(src0)
-expected = src0.cpu().clone()
-expected[32:] = 0.0
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    assert bool((dst.cpu() == expected).all()), f"masked store mismatch: {dst.cpu()[:4].tolist()}"
+    print("vstore_mask example passed")
+    print(f"kept={int((dst.cpu() != 0).sum())}, last_kept={float(dst.cpu()[31]):.4f}")
 
-assert bool((dst.cpu() == expected).all()), f"masked store mismatch: {dst.cpu()[:4].tolist()}"
-print("vstore_mask example passed")
-print(f"kept={int((dst.cpu() != 0).sum())}, last_kept={float(dst.cpu()[31]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

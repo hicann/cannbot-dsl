@@ -76,36 +76,42 @@ def varange(start, dtype, *, order_mode: 'str | OrderMode'=OrderMode.INCREASED) 
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, varange, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def varange_kernel(dst):
-    out = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=dst.dtype, depth=1)
+@kernel
+def _varange_kernel(dst):
+    out = Channel(MemLoc.UB, shape=(64,), dtype=dst.dtype, depth=1)
 
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vstore(res, 0, cb.reg.varange(5, cb.dtypes.int32), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vstore(res, 0, varange(5, dtypes.int32), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(dst):
-    varange_kernel[1](dst)
+    _varange_kernel[1](dst)
 
+def main():
+    dst = torch.empty((64,), dtype=torch.int32, device="npu:0")
 
-dst = torch.empty((64,), dtype=torch.int32, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), torch.arange(5, 69, dtype=torch.int32))
+    print("varange example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-torch.testing.assert_close(dst.cpu(), torch.arange(5, 69, dtype=torch.int32))
-print("varange example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

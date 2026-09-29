@@ -12,7 +12,7 @@ export default defineConfig({
   title: 'CANNBot-DSL',
   description: '面向 Ascend NPU 的算子开发项目文档',
   base: process.env.DOCS_BASE || '/',
-  cleanUrls: true,
+  cleanUrls: false,
   lastUpdated: true,
   markdown: {
     math: true
@@ -260,7 +260,6 @@ export default defineConfig({
                 { text: 'UnitFlag', link: '/api/kernel/cube_compute/key-features-unit-flag' }
               ] },
               { text: 'enable_fp8', link: '/api/kernel/cube_compute/enable-fp8' },
-              { text: 'enable_hf32_trans', link: '/api/kernel/cube_compute/enable-hf32-trans' },
               { text: 'enable_hf32', link: '/api/kernel/cube_compute/enable-hf32' },
               { text: 'enable_hif8', link: '/api/kernel/cube_compute/enable-hif8' },
               { text: 'matmul', link: '/api/kernel/cube_compute/matmul' },
@@ -285,6 +284,20 @@ export default defineConfig({
               { text: 'dcci_entire_out', link: '/api/kernel/synchronization-cache/dcci-entire-out' },
               { text: 'dcci_entire_atomic', link: '/api/kernel/synchronization-cache/dcci-entire-atomic' },
               { text: 'dci', link: '/api/kernel/synchronization-cache/dci' }
+            ] },
+            { text: '同步管理', link: '/api/kernel/resource-management/', collapsed: false, items: [
+              { text: '系统同步能力概述', link: '/api/kernel/resource-management/system-sync-overview' },
+              { text: '核间同步能力概述', link: '/api/kernel/resource-management/inter-core-sync-overview' },
+              { text: '关键特性说明', link: '/api/kernel/resource-management/key-features' },
+              { text: 'cube_sync_block_arrive', link: '/api/kernel/resource-management/cube-sync-block-arrive' },
+              { text: 'cube_sync_block_wait', link: '/api/kernel/resource-management/cube-sync-block-wait' },
+              { text: 'cube_sync_intra_arrive', link: '/api/kernel/resource-management/cube-sync-intra-arrive' },
+              { text: 'cube_sync_intra_wait', link: '/api/kernel/resource-management/cube-sync-intra-wait' },
+              { text: 'global_sync_all', link: '/api/kernel/resource-management/global-sync-all' },
+              { text: 'vec_sync_block_arrive', link: '/api/kernel/resource-management/vec-sync-block-arrive' },
+              { text: 'vec_sync_block_wait', link: '/api/kernel/resource-management/vec-sync-block-wait' },
+              { text: 'vec_sync_intra_arrive', link: '/api/kernel/resource-management/vec-sync-intra-arrive' },
+              { text: 'vec_sync_intra_wait', link: '/api/kernel/resource-management/vec-sync-intra-wait' }
             ] }
           ] },
           { text: 'AI CPU API', link: '/api/aicpu/' },

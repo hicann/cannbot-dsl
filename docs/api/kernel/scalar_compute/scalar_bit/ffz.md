@@ -59,30 +59,34 @@ def ffz(value) -> Int64: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import ffz, vec_store_bypass
 
-@cb.kernel
-def ffz_kernel(dst):
-    cb.scalar.vec_store_bypass(dst.ptr(0), cb.scalar.ffz(3))
+@kernel
+def _ffz_kernel(dst):
+    vec_store_bypass(dst.ptr(0), ffz(3))
 
-
-@cb.jit
+@host
 def run(dst):
-    ffz_kernel[1](dst)
+    _ffz_kernel[1](dst)
 
+def main():
+    dst = torch.zeros((1,), dtype=torch.int64, device="npu:0")
 
-dst = torch.zeros((1,), dtype=torch.int64, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    result = int(dst.cpu()[0])
+    assert result == 2, result
+    print("ffz example passed")
+    print(f"ffz(3) = {result}")
 
-result = int(dst.cpu()[0])
-assert result == 2, result
-print("ffz example passed")
-print(f"ffz(3) = {result}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

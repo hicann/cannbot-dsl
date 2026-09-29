@@ -72,45 +72,51 @@ def vmax(lhs: RawVReg, rhs: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vmax, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vmax_kernel(src0, src1, dst):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vmax_kernel(src0, src1, dst):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vstore(res, 0, cb.reg.vmax(cb.reg.vload(in0, 0), cb.reg.vload(in1, 0), mask=mask), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vstore(res, 0, vmax(vload(in0, 0), vload(in1, 0), mask=mask), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst):
-    vmax_kernel[1](src0, src1, dst)
+    _vmax_kernel[1](src0, src1, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0
+    src1 = torch.zeros_like(src0)
+    dst = torch.zeros_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0
-src1 = torch.zeros_like(src0)
-dst = torch.zeros_like(src0)
+    run(src0, src1, dst)
+    torch.npu.synchronize()
 
-run(src0, src1, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), torch.maximum(src0, src1).cpu())
+    print("vmax example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), torch.maximum(src0, src1).cpu())
-print("vmax example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

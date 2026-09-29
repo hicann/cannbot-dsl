@@ -58,30 +58,34 @@ def clz(value) -> Int64: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import clz, vec_store_bypass
 
-@cb.kernel
-def clz_kernel(dst):
-    cb.scalar.vec_store_bypass(dst.ptr(0), cb.scalar.clz(1))
+@kernel
+def _clz_kernel(dst):
+    vec_store_bypass(dst.ptr(0), clz(1))
 
-
-@cb.jit
+@host
 def run(dst):
-    clz_kernel[1](dst)
+    _clz_kernel[1](dst)
 
+def main():
+    dst = torch.zeros((1,), dtype=torch.int64, device="npu:0")
 
-dst = torch.zeros((1,), dtype=torch.int64, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    result = int(dst.cpu()[0])
+    assert result == 63, result
+    print("clz example passed")
+    print(f"clz(1) = {result}")
 
-result = int(dst.cpu()[0])
-assert result == 63, result
-print("clz example passed")
-print(f"clz(1) = {result}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

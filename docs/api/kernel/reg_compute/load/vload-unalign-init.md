@@ -64,7 +64,7 @@ dtype支持的数据类型为`int4b_t`、`dtypes.int8`、`dtypes.uint8`、`dtype
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 实际访问地址在接口内部向低地址方向对齐到32字节边界后读取数据。传入的`tensor`或`tensor`与`offset`确定的地址必须按dtype对齐，对齐后的32字节读取范围必须在UB地址空间内，否则会报错。
 - UB容量上限为256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈 + 2KB 框架预留，可用248KB；SIMD+SIMT混编时再划分32KB～128KB作Data Cache，可用容量进一步减少）。UB地址偏移后不可超过实际可用容量，否则会报错。
 - 如果本指令与其他指令存在UB地址重叠，必须插入同步指令[`vmem_bar`](../reg_sync/vmem-bar.md)，保证多个指令串行化，防止出现异常数据。
@@ -85,42 +85,48 @@ dtype支持的数据类型为`int4b_t`、`dtypes.int8`、`dtypes.uint8`、`dtype
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload_unalign, vload_unalign_init, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vload_unalign_init_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (65,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vload_unalign_init_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (65,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vload_unalign_init(in0, 1)
-        cb.reg.vstore(res, 0, cb.reg.vload_unalign(in0, 1), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vload_unalign_init(in0, 1)
+        vstore(res, 0, vload_unalign(in0, 1), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vload_unalign_init_kernel[1](src0, dst)
+    _vload_unalign_init_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(65, dtype=torch.float32, device="npu:0")
+    dst = torch.empty((64,), dtype=torch.float32, device="npu:0")
 
-src0 = torch.arange(65, dtype=torch.float32, device="npu:0")
-dst = torch.empty((64,), dtype=torch.float32, device="npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), src0.cpu()[1:])
+    print("vload_unalign_init example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), src0.cpu()[1:])
-print("vload_unalign_init example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

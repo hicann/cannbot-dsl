@@ -49,7 +49,7 @@ def vreinterpret(src: RawVReg, dtype) -> RawVReg: ...
 
 - 源与目标dtype位宽必须一致，否则编译期报错。
 - 本接口不发射指令，为纯编译期类型重标注。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 本接口为纯向量计算；`mem_copy`、同步等非纯操作不得置于同一 `vf` 作用域内。
 - 本接口仅在AIV上生效。
 
@@ -63,43 +63,49 @@ def vreinterpret(src: RawVReg, dtype) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vreinterpret, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vreinterpret_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vreinterpret_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src)
+    mem_copy(buf.produce(), src)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        r = cb.reg.vreinterpret(cb.reg.vload(in0, 0), cb.dtypes.float32)
-        cb.reg.vstore(res, 0, r, mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        r = vreinterpret(vload(in0, 0), dtypes.float32)
+        vstore(res, 0, r, mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    vreinterpret_kernel[1](src, dst)
+    _vreinterpret_kernel[1](src, dst)
 
+def main():
+    src = torch.arange(1, 65, dtype=torch.int32, device="npu:0")
+    dst = torch.empty(64, dtype=torch.float32, device="npu:0")
 
-src = torch.arange(1, 65, dtype=torch.int32, device="npu:0")
-dst = torch.empty(64, dtype=torch.float32, device="npu:0")
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    bits = dst.cpu().view(torch.int32)
+    torch.testing.assert_close(bits, src.cpu())
+    print("vreinterpret example passed")
+    print(f"first={int(bits[0])}, last={int(bits[-1])}")
 
-bits = dst.cpu().view(torch.int32)
-torch.testing.assert_close(bits, src.cpu())
-print("vreinterpret example passed")
-print(f"first={int(bits[0])}, last={int(bits[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

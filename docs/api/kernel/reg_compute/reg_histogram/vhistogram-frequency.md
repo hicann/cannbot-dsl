@@ -24,7 +24,7 @@ since: 待追溯
 
 ## 功能说明
 
-对输入矢量数据寄存器中的元素进行频率统计，生成直方图，统计结果作为返回值返回。支持配置掩码用于指示参与统计的元素，掩码为1的元素参与统计，掩码为0的元素不统计。本接口需在`cb.vf()`作用域内调用。
+对输入矢量数据寄存器中的元素进行频率统计，生成直方图，统计结果作为返回值返回。支持配置掩码用于指示参与统计的元素，掩码为1的元素参与统计，掩码为0的元素不统计。本接口需在VF作用域内调用。
 
 由于源矢量数据寄存器`src`数据类型为`dtypes.uint8`（取值范围0~255），而目的矢量数据寄存器每个元素为`dtypes.uint16`，且一个Vector Length可存储128个`dtypes.uint16`数据，因此本接口支持两种模式：
 
@@ -61,7 +61,7 @@ def vhistogram_frequency(src: RawVReg, *, mask: Mask, bin: int=0) -> RawVReg: ..
 
 ### 通用约束
 
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `mask`需通过掩码设置接口预先赋值后再传入；未赋值的掩码寄存器内容不确定，会导致参与统计的元素位置错误。
 
 ### 计算约束
@@ -79,45 +79,51 @@ def vhistogram_frequency(src: RawVReg, *, mask: Mask, bin: int=0) -> RawVReg: ..
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, vhistogram_frequency, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vhistogram_frequency_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, shape=(256,), dtype=src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, shape=(128,), dtype=cb.dtypes.uint16, depth=1)
+@kernel
+def _vhistogram_frequency_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, shape=(256,), dtype=src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, shape=(128,), dtype=dtypes.uint16, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     src = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        src_mask = cb.reg.create_mask(pattern="all", elem_bits=8)
-        dst_mask = cb.reg.create_mask(pattern="all", elem_bits=16)
-        hist = cb.reg.vhistogram_frequency(cb.reg.vload(src, 0), mask=src_mask)
-        cb.reg.vstore(res, 0, hist, dst_mask)
+    with vf(mode="simd"):
+        src_mask = create_mask(pattern="all", elem_bits=8)
+        dst_mask = create_mask(pattern="all", elem_bits=16)
+        hist = vhistogram_frequency(vload(src, 0), mask=src_mask)
+        vstore(res, 0, hist, dst_mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vhistogram_frequency_kernel[1](src0, dst)
+    _vhistogram_frequency_kernel[1](src0, dst)
 
+def main():
+    src0 = (torch.arange(256, dtype=torch.int64) % 32).to(torch.uint8).to("npu:0")
+    dst = torch.empty((128,), dtype=torch.uint16).to("npu:0")
 
-src0 = (torch.arange(256, dtype=torch.int64) % 32).to(torch.uint8).to("npu:0")
-dst = torch.empty((128,), dtype=torch.uint16).to("npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    expected = torch.zeros(128, dtype=torch.int32)
+    expected[:32] = 8
+    torch.testing.assert_close(dst.cpu().to(torch.int32), expected)
+    print("vhistogram_frequency example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-expected = torch.zeros(128, dtype=torch.int32)
-expected[:32] = 8
-torch.testing.assert_close(dst.cpu().to(torch.int32), expected)
-print("vhistogram_frequency example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

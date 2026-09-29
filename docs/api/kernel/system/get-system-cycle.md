@@ -51,27 +51,34 @@ def get_system_cycle() -> Int64: ...
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(output):
-    start = cb.get_system_cycle()
-    end = cb.get_system_cycle()
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.arch import get_system_cycle
+
+@kernel
+def _kernel(output):
+    start = get_system_cycle()
+    end = get_system_cycle()
     output[0] = end - start
 
-@cb.jit
+@host
 def run(output):
-    kernel[1](output)
+    _kernel[1](output)
 
-output = torch.empty(1, dtype=torch.int64, device="npu")
-run(output)
-torch.npu.synchronize()
-elapsed_cycles = int(output.cpu()[0])
-assert elapsed_cycles > 0
-print(f"elapsed_cycles: {elapsed_cycles}")
-print("get_system_cycle example passed")
+def main():
+    output = torch.empty(1, dtype=torch.int64, device="npu")
+    run(output)
+    torch.npu.synchronize()
+    elapsed_cycles = int(output.cpu()[0])
+    assert elapsed_cycles > 0
+    print(f"elapsed_cycles: {elapsed_cycles}")
+    print("get_system_cycle example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

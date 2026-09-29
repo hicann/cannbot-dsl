@@ -68,7 +68,7 @@ dtype支持的数据类型为`int4b_t`、`dtypes.int8`、`dtypes.uint8`、`dtype
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 各功能模式下的实际读取地址必须按32字节对齐，且实际读取范围必须在UB地址空间内且不越界，否则会报错。
 - UB容量上限为256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈 + 2KB 框架预留，可用248KB；SIMD+SIMT混编时再划分32KB～128KB作Data Cache，可用容量进一步减少）。UB地址偏移后不可超过实际可用容量，否则会报错。
 - 如果本指令与其他指令存在UB地址重叠，需要插入同步指令[`vmem_bar`](../reg_sync/vmem-bar.md)，保证多个指令串行化，防止出现异常数据。
@@ -83,41 +83,47 @@ dtype支持的数据类型为`int4b_t`、`dtypes.int8`、`dtypes.uint8`、`dtype
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload_downsample, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vload_downsample_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (128,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vload_downsample_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (128,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask(elem_bits=16)
-        cb.reg.vstore(res, 0, cb.reg.vload_downsample(in0, 0), mask)
+    with vf(mode="simd"):
+        mask = full_mask(elem_bits=16)
+        vstore(res, 0, vload_downsample(in0, 0), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vload_downsample_kernel[1](src0, dst)
+    _vload_downsample_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(128, dtype=torch.int32).to(torch.float16).to("npu:0")
+    dst = torch.empty((64,), dtype=torch.float16, device="npu:0")
 
-src0 = torch.arange(128, dtype=torch.int32).to(torch.float16).to("npu:0")
-dst = torch.empty((64,), dtype=torch.float16, device="npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    assert bool((dst.cpu() == src0.cpu()[0::2]).all()), f"downsample mismatch: {dst.cpu()[:4].tolist()}"
+    print("vload_downsample example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-assert bool((dst.cpu() == src0.cpu()[0::2]).all()), f"downsample mismatch: {dst.cpu()[:4].tolist()}"
-print("vload_downsample example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

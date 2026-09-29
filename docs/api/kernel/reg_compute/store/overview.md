@@ -1,6 +1,6 @@
 # Reg数据搬出概述
 
-Reg数据搬出接口用于将矢量数据寄存器、掩码寄存器或非对齐寄存器中的数据写入Unified Buffer（UB）。接口在Vector Function（`with cb.vf(mode="simd"):` 作用域）内使用，仅在AIV上生效。
+Reg数据搬出接口用于将矢量数据寄存器、掩码寄存器或非对齐寄存器中的数据写入Unified Buffer（UB）。接口在VF作用域内使用，仅在AIV上生效。
 
 ## 接口概览
 
@@ -77,59 +77,65 @@ Reg数据搬出接口用于将矢量数据寄存器、掩码寄存器或非对�
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
+
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vadd, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
 N = 1024
 VL = 128  # 单次搬出128个元素
 
+@kernel
+def _store_offset_kernel(src0, src1, dst_imm, dst_post):
+    buf0 = Channel(MemLoc.UB, (N,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (N,), src1.dtype, depth=1)
+    out0 = Channel(MemLoc.UB, (N,), dst_imm.dtype, depth=1)
+    out1 = Channel(MemLoc.UB, (N,), dst_post.dtype, depth=1)
 
-@cb.kernel
-def store_offset_kernel(src0, src1, dst_imm, dst_post):
-    buf0 = cb.Channel(cb.MemLoc.UB, (N,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (N,), src1.dtype, depth=1)
-    out0 = cb.Channel(cb.MemLoc.UB, (N,), dst_imm.dtype, depth=1)
-    out1 = cb.Channel(cb.MemLoc.UB, (N,), dst_post.dtype, depth=1)
-
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     a = buf0.consume()
     b = buf1.consume()
     r0 = out0.produce()
     r1 = out1.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask(elem_bits=16)
+    with vf(mode="simd"):
+        mask = full_mask(elem_bits=16)
         for i in range(N // VL):
-            acc = cb.reg.vadd(cb.reg.vload(a, i * VL), cb.reg.vload(b, i * VL), mask=mask)
+            acc = vadd(vload(a, i * VL), vload(b, i * VL), mask=mask)
             # 立即数偏移搬出：offset 相对目的基地址，单位为元素
-            cb.reg.vstore(r0, i * VL, acc, mask)
+            vstore(r0, i * VL, acc, mask)
             # Post Update搬出：offset 为游标步长，目的地址由硬件自动推进
-            cb.reg.vstore(r1, VL, acc, mask, post_update=True)
+            vstore(r1, VL, acc, mask, post_update=True)
 
-    cb.mem_copy(dst_imm, out0.consume())
-    cb.mem_copy(dst_post, out1.consume())
+    mem_copy(dst_imm, out0.consume())
+    mem_copy(dst_post, out1.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst_imm, dst_post):
-    store_offset_kernel[1](src0, src1, dst_imm, dst_post)
+    _store_offset_kernel[1](src0, src1, dst_imm, dst_post)
 
+def main():
+    src0 = torch.arange(N, dtype=torch.float16, device="npu:0")
+    src1 = torch.full((N,), 1000.0, dtype=torch.float16, device="npu:0")
+    dst_imm = torch.full((N,), -1.0, dtype=torch.float16, device="npu:0")
+    dst_post = torch.full((N,), -1.0, dtype=torch.float16, device="npu:0")
 
-src0 = torch.arange(N, dtype=torch.float16, device="npu:0")
-src1 = torch.full((N,), 1000.0, dtype=torch.float16, device="npu:0")
-dst_imm = torch.full((N,), -1.0, dtype=torch.float16, device="npu:0")
-dst_post = torch.full((N,), -1.0, dtype=torch.float16, device="npu:0")
+    run(src0, src1, dst_imm, dst_post)
+    torch.npu.synchronize()
 
-run(src0, src1, dst_imm, dst_post)
-torch.npu.synchronize()
+    expected = (src0.cpu() + src1.cpu()).half()
+    assert bool((dst_imm.cpu() == expected).all()), "立即数偏移搬出结果不符"
+    assert bool((dst_post.cpu() == expected).all()), "Post Update搬出结果不符"
+    print("store offset example passed")
+    print(f"imm_last={float(dst_imm.cpu()[-1]):.1f}, post_last={float(dst_post.cpu()[-1]):.1f}")
 
-expected = (src0.cpu() + src1.cpu()).half()
-assert bool((dst_imm.cpu() == expected).all()), "立即数偏移搬出结果不符"
-assert bool((dst_post.cpu() == expected).all()), "Post Update搬出结果不符"
-print("store offset example passed")
-print(f"imm_last={float(dst_imm.cpu()[-1]):.1f}, post_last={float(dst_post.cpu()[-1]):.1f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

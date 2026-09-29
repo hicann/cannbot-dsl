@@ -61,40 +61,49 @@ def enable_fp8() -> None: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
-@cb.kernel
-def enable_fp8_kernel(a, b, c):
-    l1a = cb.Channel(cb.MemLoc.L1, shape=(16, 16), dtype=cb.dtypes.float8_e4m3fn, depth=1)
-    l1b = cb.Channel(cb.MemLoc.L1, shape=(16, 16), dtype=cb.dtypes.float8_e4m3fn, depth=1)
-    l0a = cb.Channel(cb.MemLoc.L0A, shape=(16, 16), dtype=cb.dtypes.float8_e4m3fn, depth=1)
-    l0b = cb.Channel(cb.MemLoc.L0B, shape=(16, 16), dtype=cb.dtypes.float8_e4m3fn, depth=1)
-    l0c = cb.Channel(cb.MemLoc.L0C, shape=(16, 16), dtype=cb.dtypes.float32, depth=1)
-    cb.mem_copy(l1a.produce(), a, engine=cb.make_copy_engine(format_transform="nd2nz"))
-    cb.mem_copy(l1b.produce(), b, engine=cb.make_copy_engine(format_transform="nd2nz"))
-    cb.cube.enable_fp8()
-    cb.mem_copy(l0a.produce(), l1a.consume())
-    cb.mem_copy(l0b.produce(), l1b.consume())
-    cb.matmul(l0c.produce(), l0a.consume(), l0b.consume(), init=True)
-    cb.mem_copy(c, l0c.consume())
+from cannbotdsl import Channel, dtypes, host, make_copy_engine, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.cube import enable_fp8
+from cannbotdsl.ops.matmul import matmul
+from cannbotdsl.tensor import MemLoc
 
-@cb.jit
+@kernel
+def _enable_fp8_kernel(a, b, c):
+    l1a = Channel(MemLoc.L1, shape=(16, 16), dtype=dtypes.float8_e4m3fn, depth=1)
+    l1b = Channel(MemLoc.L1, shape=(16, 16), dtype=dtypes.float8_e4m3fn, depth=1)
+    l0a = Channel(MemLoc.L0A, shape=(16, 16), dtype=dtypes.float8_e4m3fn, depth=1)
+    l0b = Channel(MemLoc.L0B, shape=(16, 16), dtype=dtypes.float8_e4m3fn, depth=1)
+    l0c = Channel(MemLoc.L0C, shape=(16, 16), dtype=dtypes.float32, depth=1)
+    mem_copy(l1a.produce(), a, engine=make_copy_engine(format_transform="nd2nz"))
+    mem_copy(l1b.produce(), b, engine=make_copy_engine(format_transform="nd2nz"))
+    enable_fp8()
+    mem_copy(l0a.produce(), l1a.consume())
+    mem_copy(l0b.produce(), l1b.consume())
+    matmul(l0c.produce(), l0a.consume(), l0b.consume(), init=True)
+    mem_copy(c, l0c.consume())
+
+@host
 def run(a, b, c):
-    enable_fp8_kernel[1](a, b, c)
+    _enable_fp8_kernel[1](a, b, c)
 
-# 18.0 对应的fp8_e4m3fn编码为0x59，该编码在HiF8下的数值为5 / 256。
-a = (torch.eye(16, dtype=torch.float32) * 18.0).to(torch.float8_e4m3fn).npu()
-b = a.clone()
-c = torch.empty((16, 16), dtype=torch.float32, device="npu:0")
-run(a, b, c)
-torch.npu.synchronize()
+def main():
+    # 18.0 对应的fp8_e4m3fn编码为0x59，该编码在HiF8下的数值为5 / 256。
+    a = (torch.eye(16, dtype=torch.float32) * 18.0).to(torch.float8_e4m3fn).npu()
+    b = a.clone()
+    c = torch.empty((16, 16), dtype=torch.float32, device="npu:0")
+    run(a, b, c)
+    torch.npu.synchronize()
 
-# 启用FP8模式后，L0A Buffer/L0B Buffer中的fp8_e4m3fn数据不转换为hifloat8，直接参与Mmad计算：
-# 乘加结果为18.0^2 = 324.0；HiF8模式下则为(5 / 256)^2 = 25 / 65536。
-torch.testing.assert_close(c.cpu(), torch.eye(16, dtype=torch.float32) * 324.0)
-print(f"fp8={a.cpu()[0, 0].float().item():.1f} -> matmul={c.cpu()[0, 0].item():.8f}")
+    # 启用FP8模式后，L0A Buffer/L0B Buffer中的fp8_e4m3fn数据不转换为hifloat8，直接参与Mmad计算：
+    # 乘加结果为18.0^2 = 324.0；HiF8模式下则为(5 / 256)^2 = 25 / 65536。
+    torch.testing.assert_close(c.cpu(), torch.eye(16, dtype=torch.float32) * 324.0)
+    print(f"fp8={a.cpu()[0, 0].float().item():.1f} -> matmul={c.cpu()[0, 0].item():.8f}")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -81,39 +81,45 @@ def vreduce_min(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vreduce_min, vstore_first
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vreduce_min_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (1,), dst.dtype, depth=1)
-    cb.mem_copy(buf.produce(), src0)
+@kernel
+def _vreduce_min_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (1,), dst.dtype, depth=1)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        acc = cb.reg.vreduce_min(cb.reg.vload(in0, 0), mask=cb.reg.full_mask())
-        cb.reg.vstore_first(res, 0, acc)
+    with vf(mode="simd"):
+        acc = vreduce_min(vload(in0, 0), mask=full_mask())
+        vstore_first(res, 0, acc)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vreduce_min_kernel[1](src0, dst)
+    _vreduce_min_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(1, 65, dtype=torch.float32, device="npu:0")
+    dst = torch.empty((1,), dtype=torch.float32, device="npu:0")
 
-src0 = torch.arange(1, 65, dtype=torch.float32, device="npu:0")
-dst = torch.empty((1,), dtype=torch.float32, device="npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), src0.min().cpu().reshape(1))
+    print(f"value={float(dst.cpu()[0]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), src0.min().cpu().reshape(1))
-print(f"value={float(dst.cpu()[0]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

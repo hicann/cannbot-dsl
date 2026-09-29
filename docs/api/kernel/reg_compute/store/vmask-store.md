@@ -50,7 +50,7 @@ def vmask_store(tensor, offset, mask: Mask, *, dist='norm') -> None: ...
 ## 约束说明
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `tensor`起始地址需32字节对齐，否则会报错。
 - UB容量上限为256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈+2KB 框架预留，可用248KB；SIMD+SIMT混编时再划分32KB~128KB作Data Cache，可用容量进一步减少）。目的操作数地址偏移后不可超过实际可用容量，否则会报错。
 - 如果本指令与其他指令存在UB地址重叠，需要插入同步指令[`vmem_bar`](../reg_sync/vmem-bar.md)，保证多个指令串行化，防止出现异常数据。
@@ -66,37 +66,43 @@ def vmask_store(tensor, offset, mask: Mask, *, dist='norm') -> None: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, vmask_store
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vmask_store_kernel(dst):
-    out = cb.Channel(cb.MemLoc.UB, (8,), dst.dtype, depth=1)
+@kernel
+def _vmask_store_kernel(dst):
+    out = Channel(MemLoc.UB, (8,), dst.dtype, depth=1)
 
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="vl32", elem_bits=32)
-        cb.reg.vmask_store(res, 0, mask)
+    with vf(mode="simd"):
+        mask = create_mask(pattern="vl32", elem_bits=32)
+        vmask_store(res, 0, mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(dst):
-    vmask_store_kernel[1](dst)
+    _vmask_store_kernel[1](dst)
 
+def main():
+    dst = torch.zeros((8,), dtype=torch.int32, device="npu:0")
 
-dst = torch.zeros((8,), dtype=torch.int32, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    words = [int(w) & 0xFFFFFFFF for w in dst.cpu().tolist()]
+    assert sum(w.bit_count() for w in words) == 32, f"unexpected mask layout: {words}"
+    print("vmask_store example passed")
+    print(f"word0={words[0]:#010x}, set_bits={sum(w.bit_count() for w in words)}")
 
-words = [int(w) & 0xFFFFFFFF for w in dst.cpu().tolist()]
-assert sum(w.bit_count() for w in words) == 32, f"unexpected mask layout: {words}"
-print("vmask_store example passed")
-print(f"word0={words[0]:#010x}, set_bits={sum(w.bit_count() for w in words)}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

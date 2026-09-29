@@ -65,25 +65,32 @@ def get_status() -> Int64: ...
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(output):
-    output[0] = cb.get_status()
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.arch import get_status
 
-@cb.jit
+@kernel
+def _kernel(output):
+    output[0] = get_status()
+
+@host
 def run(output):
-    kernel[1](output)
+    _kernel[1](output)
 
-output = torch.empty(1, dtype=torch.int64, device="npu")
-run(output)
-torch.npu.synchronize()
-status = int(output.cpu()[0])
-assert isinstance(status, int)
-print(f"status: 0x{status & ((1 << 64) - 1):016x}")
-print("get_status example passed")
+def main():
+    output = torch.empty(1, dtype=torch.int64, device="npu")
+    run(output)
+    torch.npu.synchronize()
+    status = int(output.cpu()[0])
+    assert isinstance(status, int)
+    print(f"status: 0x{status & ((1 << 64) - 1):016x}")
+    print("get_status example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

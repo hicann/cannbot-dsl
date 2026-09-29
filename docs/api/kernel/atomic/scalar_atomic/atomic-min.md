@@ -77,29 +77,33 @@ def atomic_min(ptr, value) -> ScalarValue: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
-from cannbotdsl import dtypes
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import dtypes, host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.arch import get_block_idx
+from cannbotdsl.ops.scalar import atomic_min
 
-@cb.kernel
-def atomic_min_kernel(acc):
+@kernel
+def _atomic_min_kernel(acc):
     # 4 个 block 分别以自己序号 + 1（1~4）参与原子取小
-    cb.scalar.atomic_min(acc.ptr(0), dtypes.int32(cb.get_block_idx() + 1))
+    atomic_min(acc.ptr(0), dtypes.int32(get_block_idx() + 1))
 
-
-@cb.jit
+@host
 def run(acc):
-    atomic_min_kernel[4](acc)
+    _atomic_min_kernel[4](acc)
 
+def main():
+    acc = torch.full((1,), 100, dtype=torch.int32, device="npu:0")
+    run(acc)
+    torch.npu.synchronize()
 
-acc = torch.full((1,), 100, dtype=torch.int32, device="npu:0")
-run(acc)
-torch.npu.synchronize()
+    assert acc.cpu().tolist() == [1], acc.cpu().tolist()
+    print(f"atomic_min example passed, acc={acc.cpu().tolist()}")
 
-assert acc.cpu().tolist() == [1], acc.cpu().tolist()
-print(f"atomic_min example passed, acc={acc.cpu().tolist()}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

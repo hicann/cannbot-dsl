@@ -73,7 +73,7 @@ def vstore_pack(tensor, offset, value: RawVReg, mask: Mask, *, pack_mode, post_u
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
 - 源操作数为矢量数据寄存器，目的操作数为UB地址。UB地址空间外的地址不可作为`tensor`传入。
 - UB总容量为256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈和2KB 框架预留空间，可用248KB；SIMD+SIMT混编时再划分32KB~128KB作为Data Cache，可用容量进一步减少）。目的操作数地址偏移后对应的UB范围不可超过实际可用容量，否则会报错。
@@ -95,43 +95,49 @@ def vstore_pack(tensor, offset, value: RawVReg, mask: Mask, *, pack_mode, post_u
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import PackMode, full_mask, vload, vstore_pack
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vstore_pack_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vstore_pack_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        r = cb.reg.vload(in0, 0)
-        cb.reg.vstore_pack(res, 0, r, mask, pack_mode=cb.reg.PackMode.PACK_QUARTER)
+    with vf(mode="simd"):
+        mask = full_mask()
+        r = vload(in0, 0)
+        vstore_pack(res, 0, r, mask, pack_mode=PackMode.PACK_QUARTER)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vstore_pack_kernel[1](src0, dst)
+    _vstore_pack_kernel[1](src0, dst)
 
+def main():
+    src0 = (torch.arange(64, dtype=torch.int32, device="npu:0") + 1) * 256 + 7
+    dst = torch.zeros((64,), dtype=torch.int8, device="npu:0")
+    expected = torch.full((64,), 7, dtype=torch.int8)
 
-src0 = (torch.arange(64, dtype=torch.int32, device="npu:0") + 1) * 256 + 7
-dst = torch.zeros((64,), dtype=torch.int8, device="npu:0")
-expected = torch.full((64,), 7, dtype=torch.int8)
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    assert bool((dst.cpu() == expected).all()), f"pack mismatch: {dst.cpu()[:4].tolist()}"
+    print("vstore_pack example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-assert bool((dst.cpu() == expected).all()), f"pack mismatch: {dst.cpu()[:4].tolist()}"
-print("vstore_pack example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

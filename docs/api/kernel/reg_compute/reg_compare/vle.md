@@ -60,7 +60,7 @@ def vle(lhs: RawVReg, rhs: RawVReg, *, mask: Mask) -> Mask: ...
 
 ## 约束说明
 
-- 本接口需在`cb.vf()`作用域内调用，`lhs`、`rhs`为矢量数据寄存器。
+- 本接口需在VF作用域内调用，`lhs`、`rhs`为矢量数据寄存器。
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
 - `mask`比特位为0时，计算结果对应比特位写0。
 - 浮点比较时，+0.0与-0.0视为相等。
@@ -76,43 +76,49 @@ def vle(lhs: RawVReg, rhs: RawVReg, *, mask: Mask) -> Mask: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vdups, vle, vload, vselect, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vle_kernel(src0, src1, dst):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+@kernel
+def _vle_kernel(src0, src1, dst):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0, in1, res = buf0.consume(), buf1.consume(), out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        pred = cb.reg.vle(cb.reg.vload(in0, 0), cb.reg.vload(in1, 0), mask=mask)
-        r = cb.reg.vselect(cb.reg.vdups(1.0, cb.dtypes.float32),
-                           cb.reg.vdups(0.0, cb.dtypes.float32), cond_mask=pred)
-        cb.reg.vstore(res, 0, r, mask)
-    cb.mem_copy(dst, out.consume())
+    with vf(mode="simd"):
+        mask = full_mask()
+        pred = vle(vload(in0, 0), vload(in1, 0), mask=mask)
+        r = vselect(vdups(1.0, dtypes.float32),
+                           vdups(0.0, dtypes.float32), cond_mask=pred)
+        vstore(res, 0, r, mask)
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst):
-    vle_kernel[1](src0, src1, dst)
+    _vle_kernel[1](src0, src1, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
+    src1 = torch.flip(src0, [0])
+    dst = torch.empty_like(src0)
 
-src0 = torch.arange(64, dtype=torch.float32, device="npu:0")
-src1 = torch.flip(src0, [0])
-dst = torch.empty_like(src0)
+    run(src0, src1, dst)
+    torch.npu.synchronize()
 
-run(src0, src1, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), (src0 <= src1).float().cpu())
+    print(f"count={int(dst.sum().item())}")
 
-torch.testing.assert_close(dst.cpu(), (src0 <= src1).float().cpu())
-print(f"count={int(dst.sum().item())}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

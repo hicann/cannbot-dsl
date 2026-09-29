@@ -51,25 +51,32 @@ Cube、Vector 和 Mix 1:1 模式返回 `1`。Mix 1:2 模式下，Cube 侧返回 
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(output):
-    output[cb.get_subblock_id()] = cb.get_subblock_dim()
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.arch import get_subblock_dim, get_subblock_id
 
-@cb.jit
+@kernel
+def _kernel(output):
+    output[get_subblock_id()] = get_subblock_dim()
+
+@host
 def run(output):
-    kernel[1](output)
+    _kernel[1](output)
 
-output = torch.full((2,), -1, dtype=torch.int64, device="npu")
-run(output)
-torch.npu.synchronize()
-values = [value for value in output.cpu().tolist() if value >= 0]
-assert values and all(value in (1, 2) for value in values)
-print(f"subblock_dims: {sorted(set(values))}")
-print("get_subblock_dim example passed")
+def main():
+    output = torch.full((2,), -1, dtype=torch.int64, device="npu")
+    run(output)
+    torch.npu.synchronize()
+    values = [value for value in output.cpu().tolist() if value >= 0]
+    assert values and all(value in (1, 2) for value in values)
+    print(f"subblock_dims: {sorted(set(values))}")
+    print("get_subblock_dim example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

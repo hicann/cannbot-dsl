@@ -69,7 +69,7 @@ dtype支持的数据类型：`dtypes.int8`、`dtypes.uint8`、`dtypes.int16`、`
 ## 约束说明
 
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `mask`为掩码寄存器。
 
 ## 调用示例
@@ -82,37 +82,43 @@ dtype支持的数据类型：`dtypes.int8`、`dtypes.uint8`、`dtypes.int16`、`
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, full_mask, vsqueeze, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vsqueeze_kernel(dst):
-    out = cb.Channel(cb.MemLoc.UB, (128,), dst.dtype, depth=1)
+@kernel
+def _vsqueeze_kernel(dst):
+    out = Channel(MemLoc.UB, (128,), dst.dtype, depth=1)
 
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="vl32", elem_bits=16)
-        cb.reg.vstore(res, 0, cb.reg.vsqueeze(mask, cb.dtypes.uint16), cb.reg.full_mask(elem_bits=16))
+    with vf(mode="simd"):
+        mask = create_mask(pattern="vl32", elem_bits=16)
+        vstore(res, 0, vsqueeze(mask, dtypes.uint16), full_mask(elem_bits=16))
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(dst):
-    vsqueeze_kernel[1](dst)
+    _vsqueeze_kernel[1](dst)
 
+def main():
+    dst = torch.empty((128,), dtype=torch.uint16, device="npu:0")
 
-dst = torch.empty((128,), dtype=torch.uint16, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    expected = torch.tensor([min(i, 32) for i in range(128)], dtype=torch.int32)
+    torch.testing.assert_close(dst.cpu().to(torch.int32), expected)
+    print("vsqueeze example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-expected = torch.tensor([min(i, 32) for i in range(128)], dtype=torch.int32)
-torch.testing.assert_close(dst.cpu().to(torch.int32), expected)
-print("vsqueeze example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

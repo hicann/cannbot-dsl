@@ -64,7 +64,7 @@ def vstore_interleave(tensor, offset, src0: RawVReg, src1: RawVReg, *, width=Non
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `tensor`起始地址需32字节对齐，否则会报错。
 - UB容量上限为256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈+2KB 框架预留，可用248KB；SIMD+SIMT混编时再划分32KB~128KB作Data Cache，可用容量进一步减少）。目的操作数地址偏移后不可超过实际可用容量，否则会报错。
 - 通过`offset`参数偏移后的实际访问地址需落在UB地址范围内，且实际访问地址仍需32字节对齐，否则会报错。
@@ -80,47 +80,53 @@ def vstore_interleave(tensor, offset, src0: RawVReg, src1: RawVReg, *, width=Non
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import vload, vstore_interleave
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vstore_interleave_kernel(src0, src1, dst):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (128,), dst.dtype, depth=1)
+@kernel
+def _vstore_interleave_kernel(src0, src1, dst):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    out = Channel(MemLoc.UB, (128,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        cb.reg.vstore_interleave(res, 0, cb.reg.vload(in0, 0), cb.reg.vload(in1, 0))
+    with vf(mode="simd"):
+        vstore_interleave(res, 0, vload(in0, 0), vload(in1, 0))
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst):
-    vstore_interleave_kernel[1](src0, src1, dst)
+    _vstore_interleave_kernel[1](src0, src1, dst)
 
+def main():
+    src0 = torch.arange(64, dtype=torch.int32).to(torch.float16).to("npu:0")
+    src1 = src0 + 100.0
+    dst = torch.empty((128,), dtype=torch.float16, device="npu:0")
+    expected = torch.zeros(128, dtype=torch.float16)
+    expected[0::2] = src0.cpu()
+    expected[1::2] = src1.cpu()
 
-src0 = torch.arange(64, dtype=torch.int32).to(torch.float16).to("npu:0")
-src1 = src0 + 100.0
-dst = torch.empty((128,), dtype=torch.float16, device="npu:0")
-expected = torch.zeros(128, dtype=torch.float16)
-expected[0::2] = src0.cpu()
-expected[1::2] = src1.cpu()
+    run(src0, src1, dst)
+    torch.npu.synchronize()
 
-run(src0, src1, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), expected)
+    print("vstore_interleave example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), expected)
-print("vstore_interleave example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

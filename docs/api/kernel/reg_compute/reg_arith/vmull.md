@@ -72,7 +72,7 @@ def vmull(src0: RawVReg, src1: RawVReg, dtype, *, mask: Mask) -> tuple[RawVReg, 
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - `mask`需通过掩码设置接口预先赋值后再传入，未赋值的掩码寄存器内容不确定，会导致有效元素位置错误。
 - 掩码位为0的元素位置不参与乘法运算，`dst0`和`dst1`对应位置写0。
 
@@ -91,54 +91,60 @@ def vmull(src0: RawVReg, src1: RawVReg, dtype, *, mask: Mask) -> tuple[RawVReg, 
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vmull, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vmull_kernel(src0, src1, low, high):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    lo = cb.Channel(cb.MemLoc.UB, (64,), low.dtype, depth=1)
-    hi = cb.Channel(cb.MemLoc.UB, (64,), high.dtype, depth=1)
+@kernel
+def _vmull_kernel(src0, src1, low, high):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    lo = Channel(MemLoc.UB, (64,), low.dtype, depth=1)
+    hi = Channel(MemLoc.UB, (64,), high.dtype, depth=1)
 
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     res_lo = lo.produce()
     res_hi = hi.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        dst0, dst1 = cb.reg.vmull(cb.reg.vload(in0, 0), cb.reg.vload(in1, 0),
-                                  cb.dtypes.int32, mask=mask)
-        cb.reg.vstore(res_lo, 0, dst0, mask)
-        cb.reg.vstore(res_hi, 0, dst1, mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        dst0, dst1 = vmull(vload(in0, 0), vload(in1, 0),
+                                  dtypes.int32, mask=mask)
+        vstore(res_lo, 0, dst0, mask)
+        vstore(res_hi, 0, dst1, mask)
 
-    cb.mem_copy(low, lo.consume())
-    cb.mem_copy(high, hi.consume())
+    mem_copy(low, lo.consume())
+    mem_copy(high, hi.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, low, high):
-    vmull_kernel[1](src0, src1, low, high)
+    _vmull_kernel[1](src0, src1, low, high)
 
+def main():
+    src0 = torch.full((64,), 65536, dtype=torch.int32, device="npu:0")
+    src1 = torch.full((64,), 65536, dtype=torch.int32, device="npu:0")
+    low = torch.zeros_like(src0)
+    high = torch.zeros_like(src0)
 
-src0 = torch.full((64,), 65536, dtype=torch.int32, device="npu:0")
-src1 = torch.full((64,), 65536, dtype=torch.int32, device="npu:0")
-low = torch.zeros_like(src0)
-high = torch.zeros_like(src0)
+    run(src0, src1, low, high)
+    torch.npu.synchronize()
 
-run(src0, src1, low, high)
-torch.npu.synchronize()
+    # 65536 * 65536 = 0x0000000100000000
+    torch.testing.assert_close(low.cpu(), torch.zeros_like(src0.cpu()))
+    torch.testing.assert_close(high.cpu(), torch.ones_like(src0.cpu()))
+    print("vmull example passed")
+    print(f"low={int(low.cpu()[0])}, high={int(high.cpu()[0])}")
 
-# 65536 * 65536 = 0x0000000100000000
-torch.testing.assert_close(low.cpu(), torch.zeros_like(src0.cpu()))
-torch.testing.assert_close(high.cpu(), torch.ones_like(src0.cpu()))
-print("vmull example passed")
-print(f"low={int(low.cpu()[0])}, high={int(high.cpu()[0])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

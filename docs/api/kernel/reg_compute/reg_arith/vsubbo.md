@@ -82,54 +82,60 @@ def vsubbo(src0: RawVReg, src1: RawVReg, *, mask: Mask) -> tuple[Mask, RawVReg]:
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vmask_store, vstore, vsubbo
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vsubbo_kernel(src0, src1, dst, carry_out):
-    buf0 = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    buf1 = cb.Channel(cb.MemLoc.UB, (64,), src1.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
-    cbuf = cb.Channel(cb.MemLoc.UB, (8,), carry_out.dtype, depth=1)
+@kernel
+def _vsubbo_kernel(src0, src1, dst, carry_out):
+    buf0 = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    buf1 = Channel(MemLoc.UB, (64,), src1.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
+    cbuf = Channel(MemLoc.UB, (8,), carry_out.dtype, depth=1)
 
-    cb.mem_copy(buf0.produce(), src0)
-    cb.mem_copy(buf1.produce(), src1)
+    mem_copy(buf0.produce(), src0)
+    mem_copy(buf1.produce(), src1)
 
     in0 = buf0.consume()
     in1 = buf1.consume()
     res = out.produce()
     cout = cbuf.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        carry, acc = cb.reg.vsubbo(cb.reg.vload(in0, 0), cb.reg.vload(in1, 0), mask=mask)
-        cb.reg.vstore(res, 0, acc, mask)
-        cb.reg.vmask_store(cout, 0, carry)
+    with vf(mode="simd"):
+        mask = full_mask()
+        carry, acc = vsubbo(vload(in0, 0), vload(in1, 0), mask=mask)
+        vstore(res, 0, acc, mask)
+        vmask_store(cout, 0, carry)
 
-    cb.mem_copy(dst, out.consume())
-    cb.mem_copy(carry_out, cbuf.consume())
+    mem_copy(dst, out.consume())
+    mem_copy(carry_out, cbuf.consume())
 
-
-@cb.jit
+@host
 def run(src0, src1, dst, carry_out):
-    vsubbo_kernel[1](src0, src1, dst, carry_out)
+    _vsubbo_kernel[1](src0, src1, dst, carry_out)
 
+def main():
+    src0 = torch.tensor([7, 3] * 32, dtype=torch.int32, device="npu:0")
+    src1 = torch.tensor([3, 7] * 32, dtype=torch.int32, device="npu:0")
+    dst = torch.zeros_like(src0)
+    carry_out = torch.zeros((8,), dtype=torch.int32, device="npu:0")
 
-src0 = torch.tensor([7, 3] * 32, dtype=torch.int32, device="npu:0")
-src1 = torch.tensor([3, 7] * 32, dtype=torch.int32, device="npu:0")
-dst = torch.zeros_like(src0)
-carry_out = torch.zeros((8,), dtype=torch.int32, device="npu:0")
+    run(src0, src1, dst, carry_out)
+    torch.npu.synchronize()
 
-run(src0, src1, dst, carry_out)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(),
+                               torch.tensor([4, -4] * 32, dtype=torch.int32))
+    carry_words = carry_out.cpu()
+    print("vsubbo example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}, "
+          f"carry_ok={bool((carry_words != 0).any())}")
 
-torch.testing.assert_close(dst.cpu(),
-                           torch.tensor([4, -4] * 32, dtype=torch.int32))
-carry_words = carry_out.cpu()
-print("vsubbo example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}, "
-      f"carry_ok={bool((carry_words != 0).any())}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

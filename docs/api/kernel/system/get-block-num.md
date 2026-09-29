@@ -57,28 +57,33 @@ def get_block_num() -> Int64: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.arch import get_block_idx, get_block_num
+from cannbotdsl.ops.scalar import vec_store_bypass
 
-@cb.kernel
-def get_block_num_kernel(output):
-    cb.scalar.vec_store_bypass(output.ptr(cb.get_block_idx()), cb.get_block_num())
+@kernel
+def _get_block_num_kernel(output):
+    vec_store_bypass(output.ptr(get_block_idx()), get_block_num())
 
-
-@cb.jit
+@host
 def run(output):
-    get_block_num_kernel[4](output)
+    _get_block_num_kernel[4](output)
 
+def main():
+    output = torch.empty(4, dtype=torch.int64, device="npu:0")
+    run(output)
+    torch.npu.synchronize()
 
-output = torch.empty(4, dtype=torch.int64, device="npu:0")
-run(output)
-torch.npu.synchronize()
+    assert output.cpu().tolist() == [4, 4, 4, 4]
+    print("get_block_num example passed")
+    print(f"block_num={output.cpu().tolist()[0]}")
 
-assert output.cpu().tolist() == [4, 4, 4, 4]
-print("get_block_num example passed")
-print(f"block_num={output.cpu().tolist()[0]}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

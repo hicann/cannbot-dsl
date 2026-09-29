@@ -1,6 +1,6 @@
 # Reg矢量计算
 
-Reg矢量计算接口在 `simd` 模式下操作矢量数据寄存器与掩码寄存器，均须在 `with cb.vf(mode="simd"):` 作用域内调用，仅在 AIV 上生效。
+Reg矢量计算接口在 `simd` 模式下操作矢量数据寄存器与掩码寄存器，均须在VF作用域内调用，仅在 AIV 上生效。
 
 - **[概述](/api/kernel/reg_compute/overview)**
 - **[关键特性说明](/api/kernel/reg_compute/key-features)**

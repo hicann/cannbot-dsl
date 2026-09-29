@@ -283,6 +283,14 @@
   }
 }
 
+/* API 文档页脚注（来源声明等）：正文 16px，这里 9px + 更淡的灰，尽量退到背景里 */
+.vp-doc .doc-footnote {
+  margin-top: 20px;
+  color: color-mix(in srgb, var(--vp-c-text-3) 62%, transparent);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
 /* API landing page */
 .api-index-page .vp-doc > h1 {
   position: relative;

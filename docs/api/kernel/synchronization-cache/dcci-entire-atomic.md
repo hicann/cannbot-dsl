@@ -50,26 +50,34 @@ def dcci_entire_atomic() -> None: ...
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(counter):
-    cb.scalar.atomic_add(counter.ptr(0), 1)
-    cb.dcci_entire_atomic()
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import atomic_add
+from cannbotdsl.ops.sync import dcci_entire_atomic
 
-@cb.jit
+@kernel
+def _kernel(counter):
+    atomic_add(counter.ptr(0), 1)
+    dcci_entire_atomic()
+
+@host
 def run(counter):
-    kernel[1](counter)
+    _kernel[1](counter)
 
-counter = torch.zeros(1, dtype=torch.int32, device="npu")
-run(counter)
-torch.npu.synchronize()
-value = int(counter.cpu()[0])
-assert value == 1
-print(f"counter: {value}")
-print("dcci_entire_atomic example passed")
+def main():
+    counter = torch.zeros(1, dtype=torch.int32, device="npu")
+    run(counter)
+    torch.npu.synchronize()
+    value = int(counter.cpu()[0])
+    assert value == 1
+    print(f"counter: {value}")
+    print("dcci_entire_atomic example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

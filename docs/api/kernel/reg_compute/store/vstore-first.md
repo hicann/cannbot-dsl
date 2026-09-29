@@ -69,7 +69,7 @@ def vstore_first(tensor, offset, value: RawVReg, *, post_update: bool=False) -> 
 ### 通用约束
 
 - 本接口仅在AIV上生效。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 源操作数为矢量数据寄存器，目的操作数为UB地址，UB地址空间外的地址不可作为`tensor`传入。
 - UB容量上限：UB总容量256KB，用户可用容量随编译选项与编程场景变化（默认预留6KB SIMD VF栈+2KB 框架预留，可用248KB；SIMD+SIMT混编时再划分32KB~128KB作Data Cache，可用容量进一步减少）。`tensor`偏移后不可超过实际可用容量。
 - 如果本指令与其他指令存在UB地址重叠，需要插入同步指令[`vmem_bar`](../reg_sync/vmem-bar.md)，保证多个指令串行化，防止出现异常数据。
@@ -88,40 +88,46 @@ def vstore_first(tensor, offset, value: RawVReg, *, post_update: bool=False) -> 
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import vload, vstore_first
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vstore_first_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (1,), dst.dtype, depth=1)
+@kernel
+def _vstore_first_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (64,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (1,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        cb.reg.vstore_first(res, 0, cb.reg.vload(in0, 0))
+    with vf(mode="simd"):
+        vstore_first(res, 0, vload(in0, 0))
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    vstore_first_kernel[1](src0, dst)
+    _vstore_first_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(1, 65, dtype=torch.float32, device="npu:0")
+    dst = torch.empty((1,), dtype=torch.float32, device="npu:0")
 
-src0 = torch.arange(1, 65, dtype=torch.float32, device="npu:0")
-dst = torch.empty((1,), dtype=torch.float32, device="npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), src0.cpu()[:1])
+    print("vstore_first example passed")
+    print(f"value={float(dst.cpu()[0]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), src0.cpu()[:1])
-print("vstore_first example passed")
-print(f"value={float(dst.cpu()[0]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

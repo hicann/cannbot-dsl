@@ -1,6 +1,6 @@
 # Reg数据搬入概述
 
-Reg数据搬入接口用于将Unified Buffer（UB）中的数据搬入矢量数据寄存器、掩码寄存器或非对齐寄存器。接口均仅在AIV上生效，且需在Vector Function（`with cb.vf(mode="simd"):` 作用域）内调用。
+Reg数据搬入接口用于将Unified Buffer（UB）中的数据搬入矢量数据寄存器、掩码寄存器或非对齐寄存器。接口均仅在AIV上生效，且需在VF作用域内调用。
 
 ## 接口分类与选择
 
@@ -163,48 +163,62 @@ Reg数据搬入接口用于将Unified Buffer（UB）中的数据搬入矢量数�
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import (
+    full_mask,
+    vload_unalign,
+    vload_unalign_init,
+    vsqueeze_and_storeunalign_finalize,
+    vsqueeze_and_storeunalign_init,
+    vstore_unalign,
+    vstore_unalign_begin,
+)
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def load_unalign_kernel(src0, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (65,), src0.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _load_unalign_kernel(src0, dst):
+    buf = Channel(MemLoc.UB, (65,), src0.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
+    mem_copy(buf.produce(), src0)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
+    with vf(mode="simd"):
+        mask = full_mask()
         # 非对齐搬入：先初始化非对齐寄存器，再拼接出从元素1开始的VL长度数据
-        cb.reg.vload_unalign_init(in0, 1)
-        v = cb.reg.vload_unalign(in0, 1)
+        vload_unalign_init(in0, 1)
+        v = vload_unalign(in0, 1)
         # 非对齐搬出：连续搬出主块，循环结束后写回暂存的尾块
-        sq = cb.reg.vsqueeze_and_storeunalign_init(v, mask=mask)
-        ureg = cb.reg.vstore_unalign_begin(res)
-        cb.reg.vstore_unalign(res, 0, sq, ureg)
-        cb.reg.vsqueeze_and_storeunalign_finalize(res, 0, ureg)
+        sq = vsqueeze_and_storeunalign_init(v, mask=mask)
+        ureg = vstore_unalign_begin(res)
+        vstore_unalign(res, 0, sq, ureg)
+        vsqueeze_and_storeunalign_finalize(res, 0, ureg)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, dst):
-    load_unalign_kernel[1](src0, dst)
+    _load_unalign_kernel[1](src0, dst)
 
+def main():
+    src0 = torch.arange(65, dtype=torch.float32, device="npu:0")
+    dst = torch.empty((64,), dtype=torch.float32, device="npu:0")
 
-src0 = torch.arange(65, dtype=torch.float32, device="npu:0")
-dst = torch.empty((64,), dtype=torch.float32, device="npu:0")
+    run(src0, dst)
+    torch.npu.synchronize()
 
-run(src0, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), src0.cpu()[1:])
+    print("load unalign example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), src0.cpu()[1:])
-print("load unalign example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

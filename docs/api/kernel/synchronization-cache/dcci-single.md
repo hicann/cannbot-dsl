@@ -52,26 +52,33 @@ def dcci_single(point) -> None: ...
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(output):
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.sync import dcci_single
+
+@kernel
+def _kernel(output):
     output[0] = 7
-    cb.dcci_single(output[0])
+    dcci_single(output[0])
 
-@cb.jit
+@host
 def run(output):
-    kernel[1](output)
+    _kernel[1](output)
 
-output = torch.zeros(32, dtype=torch.int32, device="npu")
-run(output)
-torch.npu.synchronize()
-value = int(output.cpu()[0])
-assert value == 7
-print(f"output[0]: {value}")
-print("dcci_single example passed")
+def main():
+    output = torch.zeros(32, dtype=torch.int32, device="npu")
+    run(output)
+    torch.npu.synchronize()
+    value = int(output.cpu()[0])
+    assert value == 7
+    print(f"output[0]: {value}")
+    print("dcci_single example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

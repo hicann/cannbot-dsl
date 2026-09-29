@@ -51,26 +51,33 @@ def dci() -> None: ...
 ## 调用示例
 
 ```python
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401
 
-@cb.kernel
-def kernel(output):
-    cb.dci()
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.sync import dci
+
+@kernel
+def _kernel(output):
+    dci()
     output[0] = 1
 
-@cb.jit
+@host
 def run(output):
-    kernel[1](output)
+    _kernel[1](output)
 
-output = torch.zeros(1, dtype=torch.int32, device="npu")
-run(output)
-torch.npu.synchronize()
-value = int(output.cpu()[0])
-assert value == 1
-print(f"output[0]: {value}")
-print("dci example passed")
+def main():
+    output = torch.zeros(1, dtype=torch.int32, device="npu")
+    run(output)
+    torch.npu.synchronize()
+    value = int(output.cpu()[0])
+    assert value == 1
+    print(f"output[0]: {value}")
+    print("dci example passed")
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

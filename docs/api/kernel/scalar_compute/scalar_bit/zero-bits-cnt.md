@@ -58,30 +58,34 @@ def zero_bits_cnt(value) -> Int64: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import host
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.scalar import vec_store_bypass, zero_bits_cnt
 
-@cb.kernel
-def zero_bits_cnt_kernel(dst):
-    cb.scalar.vec_store_bypass(dst.ptr(0), cb.scalar.zero_bits_cnt(15))
+@kernel
+def _zero_bits_cnt_kernel(dst):
+    vec_store_bypass(dst.ptr(0), zero_bits_cnt(15))
 
-
-@cb.jit
+@host
 def run(dst):
-    zero_bits_cnt_kernel[1](dst)
+    _zero_bits_cnt_kernel[1](dst)
 
+def main():
+    dst = torch.zeros((1,), dtype=torch.int64, device="npu:0")
 
-dst = torch.zeros((1,), dtype=torch.int64, device="npu:0")
+    run(dst)
+    torch.npu.synchronize()
 
-run(dst)
-torch.npu.synchronize()
+    result = int(dst.cpu()[0])
+    assert result == 60, result
+    print("zero_bits_cnt example passed")
+    print(f"zero_bits_cnt(15) = {result}")
 
-result = int(dst.cpu()[0])
-assert result == 60, result
-print("zero_bits_cnt example passed")
-print(f"zero_bits_cnt(15) = {result}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -61,7 +61,7 @@ def vtrunc(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 
 ## 约束说明
 
-- 本接口需在`cb.vf()`作用域内调用，`src`为矢量数据寄存器，`mask`为掩码寄存器。
+- 本接口需在VF作用域内调用，`src`为矢量数据寄存器，`mask`为掩码寄存器。
 - `dtypes.float32`类型只支持不饱和模式。
 
 ## 调用示例
@@ -74,41 +74,47 @@ def vtrunc(src: RawVReg, *, mask: Mask) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vload, vstore, vtrunc
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vtrunc_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (64,), dst.dtype, depth=1)
+@kernel
+def _vtrunc_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (64,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src)
+    mem_copy(buf.produce(), src)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.full_mask()
-        cb.reg.vstore(res, 0, cb.reg.vtrunc(cb.reg.vload(in0, 0), mask=mask), mask)
+    with vf(mode="simd"):
+        mask = full_mask()
+        vstore(res, 0, vtrunc(vload(in0, 0), mask=mask), mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    vtrunc_kernel[1](src, dst)
+    _vtrunc_kernel[1](src, dst)
 
+def main():
+    src = (torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0) / 3.0
+    dst = torch.empty_like(src)
 
-src = (torch.arange(64, dtype=torch.float32, device="npu:0") - 32.0) / 3.0
-dst = torch.empty_like(src)
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), torch.trunc(src).cpu())
+    print("vtrunc example passed")
+    print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
 
-torch.testing.assert_close(dst.cpu(), torch.trunc(src).cpu())
-print("vtrunc example passed")
-print(f"first={float(dst.cpu()[0]):.4f}, last={float(dst.cpu()[-1]):.4f}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

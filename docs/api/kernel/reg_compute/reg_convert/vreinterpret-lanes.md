@@ -48,7 +48,7 @@ def vreinterpret_lanes(src: RawVReg, dtype) -> RawVReg: ...
 ## 约束说明
 
 - 载荷总字节数保持 256B，仅 lane 划分变化。
-- 本接口需在`cb.vf()`作用域内调用。
+- 本接口需在VF作用域内调用。
 - 本接口为纯向量计算；`mem_copy`、同步等非纯操作不得置于同一 `vf` 作用域内。
 - 本接口仅在AIV上生效。
 
@@ -62,43 +62,49 @@ def vreinterpret_lanes(src: RawVReg, dtype) -> RawVReg: ...
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, vload, vreinterpret_lanes, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vreinterpret_lanes_kernel(src, dst):
-    buf = cb.Channel(cb.MemLoc.UB, (64,), src.dtype, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, (256,), dst.dtype, depth=1)
+@kernel
+def _vreinterpret_lanes_kernel(src, dst):
+    buf = Channel(MemLoc.UB, (64,), src.dtype, depth=1)
+    out = Channel(MemLoc.UB, (256,), dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src)
+    mem_copy(buf.produce(), src)
 
     in0 = buf.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="all", elem_bits=8)
-        r = cb.reg.vreinterpret_lanes(cb.reg.vload(in0, 0), cb.dtypes.uint8)
-        cb.reg.vstore(res, 0, r, mask)
+    with vf(mode="simd"):
+        mask = create_mask(pattern="all", elem_bits=8)
+        r = vreinterpret_lanes(vload(in0, 0), dtypes.uint8)
+        vstore(res, 0, r, mask)
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src, dst):
-    vreinterpret_lanes_kernel[1](src, dst)
+    _vreinterpret_lanes_kernel[1](src, dst)
 
+def main():
+    src = torch.arange(1, 65, dtype=torch.int32, device="npu:0")
+    dst = torch.empty(256, dtype=torch.uint8, device="npu:0")
 
-src = torch.arange(1, 65, dtype=torch.int32, device="npu:0")
-dst = torch.empty(256, dtype=torch.uint8, device="npu:0")
+    run(src, dst)
+    torch.npu.synchronize()
 
-run(src, dst)
-torch.npu.synchronize()
+    bytes_out = dst.cpu()
+    torch.testing.assert_close(bytes_out, src.cpu().view(torch.uint8))
+    print("vreinterpret_lanes example passed")
+    print(f"first={int(bytes_out[0])}, last={int(bytes_out[-1])}")
 
-bytes_out = dst.cpu()
-torch.testing.assert_close(bytes_out, src.cpu().view(torch.uint8))
-print("vreinterpret_lanes example passed")
-print(f"first={int(bytes_out[0])}, last={int(bytes_out[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果

@@ -96,47 +96,53 @@ def vgather_datablock(tensor, index: RawVReg, *, mask: Mask | None=None) -> RawV
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
-import cannbotdsl as cb
 import torch
 import torch_npu  # noqa: F401  # Register the Ascend NPU backend with PyTorch.
 
+from cannbotdsl import Channel, dtypes, host, mem_copy
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import create_mask, vgather_datablock, vload, vstore
+from cannbotdsl.tensor import MemLoc
 
-@cb.kernel
-def vgather_datablock_kernel(src0, index, dst):
-    buf = cb.Channel(cb.MemLoc.UB, shape=(256,), dtype=src0.dtype, depth=1)
-    idx = cb.Channel(cb.MemLoc.UB, shape=(64,), dtype=cb.dtypes.uint32, depth=1)
-    out = cb.Channel(cb.MemLoc.UB, shape=(256,), dtype=dst.dtype, depth=1)
+@kernel
+def _vgather_datablock_kernel(src0, index, dst):
+    buf = Channel(MemLoc.UB, shape=(256,), dtype=src0.dtype, depth=1)
+    idx = Channel(MemLoc.UB, shape=(64,), dtype=dtypes.uint32, depth=1)
+    out = Channel(MemLoc.UB, shape=(256,), dtype=dst.dtype, depth=1)
 
-    cb.mem_copy(buf.produce(), src0)
-    cb.mem_copy(idx.produce(), index)
+    mem_copy(buf.produce(), src0)
+    mem_copy(idx.produce(), index)
 
     src = buf.consume()
     ind = idx.consume()
     res = out.produce()
-    with cb.vf(mode="simd"):
-        mask = cb.reg.create_mask(pattern="all", elem_bits=32)
-        blocks = cb.reg.vgather_datablock(src, cb.reg.vload(ind, 0), mask=mask)
-        cb.reg.vstore(res, 0, blocks, cb.reg.create_mask(pattern="all", elem_bits=8))
+    with vf(mode="simd"):
+        mask = create_mask(pattern="all", elem_bits=32)
+        blocks = vgather_datablock(src, vload(ind, 0), mask=mask)
+        vstore(res, 0, blocks, create_mask(pattern="all", elem_bits=8))
 
-    cb.mem_copy(dst, out.consume())
+    mem_copy(dst, out.consume())
 
-
-@cb.jit
+@host
 def run(src0, index, dst):
-    vgather_datablock_kernel[1](src0, index, dst)
+    _vgather_datablock_kernel[1](src0, index, dst)
 
+def main():
+    src0 = torch.arange(256, dtype=torch.uint8).to("npu:0")
+    index = torch.zeros(64, dtype=torch.int32, device="npu:0")
+    index[:8] = torch.arange(224, -1, -32, dtype=torch.int32, device="npu:0")
+    dst = torch.empty((256,), dtype=torch.uint8).to("npu:0")
 
-src0 = torch.arange(256, dtype=torch.uint8).to("npu:0")
-index = torch.zeros(64, dtype=torch.int32, device="npu:0")
-index[:8] = torch.arange(224, -1, -32, dtype=torch.int32, device="npu:0")
-dst = torch.empty((256,), dtype=torch.uint8).to("npu:0")
+    run(src0, index.view(torch.uint32), dst)
+    torch.npu.synchronize()
 
-run(src0, index.view(torch.uint32), dst)
-torch.npu.synchronize()
+    torch.testing.assert_close(dst.cpu(), src0.cpu().reshape(8, 32).flip(0).reshape(-1))
+    print("vgather_datablock example passed")
+    print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
 
-torch.testing.assert_close(dst.cpu(), src0.cpu().reshape(8, 32).flip(0).reshape(-1))
-print("vgather_datablock example passed")
-print(f"first={int(dst.cpu()[0])}, last={int(dst.cpu()[-1])}")
+if __name__ == "__main__":
+    main()
 ```
 
 ### 预期结果
