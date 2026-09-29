@@ -45,6 +45,7 @@ export default defineConfig({
         text: 'API 文档',
         link: '/api/',
         items: [
+          { text: '装饰器', link: '/api/decorators' },
           { text: 'Host API', link: '/api/host/', collapsed: false, items: [
             { text: '平台信息', link: '/api/host/platform-profiling/', collapsed: false, items: [
               { text: 'get_platform_info', link: '/api/host/platform-profiling/get-platform-info' },

@@ -2,6 +2,8 @@
 
 AI CPU API 使用 `cannbotdsl.aicpu` 独立命名空间，面向 AI CPU kernel 的定义、参数描述、Host 启动和诊断。
 
+有关 `@aicpu_kernel` 的基本用法，请参见[装饰器](/api/decorators)。
+
 ## 接口分类
 
 | 分类 | 主要内容 | 接口 |

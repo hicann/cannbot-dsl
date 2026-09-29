@@ -6,8 +6,8 @@ Host API 在普通 Python 代码或 Host 编排函数中使用，负责定义 Ke
 
 | 分类 | 主要内容 | 接口 |
 | --- | --- | --- |
-| 装饰器与程序定义 | 定义 JIT 函数、设备 Kernel 和调用入口 | `jit`、`kernel`、`JitFunction`、`KernelLauncher` |
-| 编译与运行 | 编译、加载、调用和复用编译产物 | `JitFunction.compile`、`load`、`ProviderCallable`、`clear_compile_cache` |
+| 装饰器与程序定义 | 定义 Host 入口、DSL 辅助函数和设备 Kernel | [`host`、`jit`、`kernel` 及其他装饰器](/api/decorators) |
+| 编译与运行 | 编译、加载、调用和复用编译产物 | `compile`、`load`、`ProviderCallable`、`clear_compile_cache` |
 | 参数与数据描述 | 描述编译期常量、动态维度和 Kernel 参数结构 | `Constexpr`、`Dim`、`TensorSpec`、`TensorListSpec`、`StructSpec` |
 | [平台信息](/api/host/platform-profiling/) | 查询设备型号、可用核数和片上存储容量 | [`get_platform_info`](/api/host/platform-profiling/get-platform-info)、[`get_mem_size`](/api/host/platform-profiling/get-mem-size) |
 | 性能分析 | 配置和读取 profiling 信息 | `ProfileSpec`、`profiler.report_tensor_info` |
