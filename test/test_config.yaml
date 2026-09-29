@@ -140,6 +140,14 @@ flash_attn_fp8_fullquant:
   options:
     - flash_attn_fp8_fullquant
 
+sparse_flash_attention:
+  module: True
+  src:
+    - samples/sparse_flash_attention
+    - test/sparse_flash_attention
+  options:
+    - sparse_flash_attention
+
 shared:
   module: True
   src:

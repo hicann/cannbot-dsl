@@ -23,3 +23,4 @@ operators:
   - stem_indexer
   - qsa_indexer
   - flash_attn_fp8_fullquant
+  - sparse_flash_attention
