@@ -4,4 +4,5 @@
 
 ## 接口
 
+- [`make_copy_engine`](/api/kernel/data-movement/make-copy-engine)：创建供 `mem_copy` 使用的数据搬运配置。
 - [`mem_copy`](/api/kernel/data-movement/mem-copy)：在 Tensor 之间搬运数据。

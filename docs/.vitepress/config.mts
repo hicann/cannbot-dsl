@@ -53,7 +53,11 @@ export default defineConfig({
             ] }
           ] },
           { text: 'Kernel API', link: '/api/kernel/', collapsed: false, items: [
+            { text: '基本数据类型与操作', link: '/api/kernel/base/', collapsed: false, items: [
+              { text: 'tile_slice', link: '/api/kernel/base/tile-slice' }
+            ] },
             { text: '数据搬运', link: '/api/kernel/data-movement/', collapsed: false, items: [
+              { text: 'make_copy_engine', link: '/api/kernel/data-movement/make-copy-engine' },
               { text: 'mem_copy', link: '/api/kernel/data-movement/mem-copy' }
             ] },
             { text: 'Reg矢量计算', link: '/api/kernel/reg_compute/', collapsed: true, items: [
@@ -298,6 +302,9 @@ export default defineConfig({
               { text: 'vec_sync_block_wait', link: '/api/kernel/resource-management/vec-sync-block-wait' },
               { text: 'vec_sync_intra_arrive', link: '/api/kernel/resource-management/vec-sync-intra-arrive' },
               { text: 'vec_sync_intra_wait', link: '/api/kernel/resource-management/vec-sync-intra-wait' }
+            ] },
+            { text: '调试接口', link: '/api/kernel/debug/', collapsed: false, items: [
+              { text: 'print', link: '/api/kernel/debug/print' }
             ] }
           ] },
           { text: 'AI CPU API', link: '/api/aicpu/' },
