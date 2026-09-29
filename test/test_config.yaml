@@ -210,3 +210,53 @@ shared:
     - .pre-commit-config.yaml
   options:
     - all
+
+quant_lightning_indexer_dsl:
+  module: True
+  src:
+    - samples/quant_lightning_indexer_dsl
+    - test/quant_lightning_indexer_dsl
+  options:
+    - quant_lightning_indexer_dsl
+
+quant_lightning_indexer_metadata_dsl:
+  module: True
+  src:
+    - samples/quant_lightning_indexer_metadata_dsl
+    - test/quant_lightning_indexer_metadata_dsl
+  options:
+    - quant_lightning_indexer_metadata_dsl
+    - quant_lightning_indexer_dsl
+
+quant_sparse_lightning_indexer_dsl:
+  module: True
+  src:
+    - samples/quant_sparse_lightning_indexer_dsl
+    - test/quant_sparse_lightning_indexer_dsl
+  options:
+    - quant_sparse_lightning_indexer_dsl
+
+quant_sparse_lightning_indexer_metadata_dsl:
+  module: True
+  src:
+    - samples/quant_sparse_lightning_indexer_metadata_dsl
+    - test/quant_sparse_lightning_indexer_metadata_dsl
+  options:
+    - quant_sparse_lightning_indexer_metadata_dsl
+    - quant_sparse_lightning_indexer_dsl
+mixed_quant_sparse_flash_mla:
+  module: True
+  src:
+    - samples/mixed_quant_sparse_flash_mla
+    - test/mixed_quant_sparse_flash_mla
+  options:
+    - mixed_quant_sparse_flash_mla
+
+mixed_quant_sparse_flash_mla_metadata:
+  module: True
+  src:
+    - samples/mixed_quant_sparse_flash_mla_metadata
+    - test/mixed_quant_sparse_flash_mla_metadata
+  options:
+    - mixed_quant_sparse_flash_mla
+    - mixed_quant_sparse_flash_mla_metadata
