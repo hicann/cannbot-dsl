@@ -15,7 +15,7 @@ CANNBot-DSL 提供六个 Python 装饰器，用于声明 Host 入口、DSL 辅�
 | [`@aicpu_kernel`](#aicpu-kernel) | 定义在 AI CPU 上执行的 Kernel | 元数据、调度或轻量控制计算 |
 | [`@export`](#export) | 声明需要发布的算子配置 | Native 算子包的构建入口 |
 
-## `@host` {#host}
+## `@host`
 
 `@host` 用于定义可从普通 Python 调用的 Host 编排函数。函数体负责组织 Kernel 调用，调用时根据参数完成编译、缓存复用和执行，也可以装饰类的实例方法。
 
@@ -51,7 +51,7 @@ program(x, y, out)
 
 `@host` 函数应返回 `None`，只能从 DSL 外部的普通 Python 调用。提前编译使用 `cb.compile(host_fn, ...)`。
 
-## `@jit` {#jit}
+## `@jit`
 
 `@jit` 用于定义 DSL 内部的内联辅助函数，可由 `@host`、`@kernel` 或其他 `@jit` 函数调用，用于拆分和复用 DSL 逻辑。
 
@@ -73,7 +73,7 @@ def add_kernel(x, y, out):
 
 辅助函数沿用调用方的 Host 或设备执行环境，可以返回计算结果。`@jit` 不能直接从普通 Python 调用，也不能作为 `cb.compile(...)` 的编译入口；Kernel 启动应直接写在 `@host` 函数体中。
 
-## `@kernel` {#kernel}
+## `@kernel`
 
 `@kernel` 用于定义在 NPU AI Core 上执行的设备函数。Kernel 负责张量数据搬运和计算，由 `@host` 函数直接发起，返回值应为 `None`。
 
@@ -116,7 +116,7 @@ def add(x, y, out):
 
 类装饰器记录构造参数，并在设备函数构建时执行 `__init__`。构造参数用于传递编译期配置，运行时参数应通过 Kernel 入口方法传入。
 
-## `@datastruct` {#datastruct}
+## `@datastruct`
 
 `@datastruct` 用于声明一组具有名称和类型的字段。此类对象可以在普通 Python 中创建，也可以作为 DSL 程序或 Kernel 的参数。
 
@@ -135,7 +135,7 @@ config = TileConfig(rows=64, columns=128)
 
 该装饰器适用于表示 tile 大小、循环次数或其他需要成组传递的配置。类体仅用于字段声明，不应定义默认值、继承关系或业务方法。
 
-## `@aicpu_kernel` {#aicpu-kernel}
+## `@aicpu_kernel`
 
 `@aicpu_kernel` 用于定义在 AI CPU 上执行的函数，通常用于生成元数据、计算调度信息或完成轻量控制任务。
 
@@ -158,7 +158,7 @@ def build_metadata(a: MetadataArgs):
 
 参数类用于说明输入、输出和标量参数。装饰后的对象可以通过 `run_host(...)` 运行 Host 参考计算，也可以通过 `compile(...)` 编译 AI CPU Kernel。
 
-## `@export` {#export}
+## `@export`
 
 `@export("name")` 由 `cannbotdsl.aot` 提供，用于声明算子发布入口。被装饰的函数不接收参数，函数体中列出需要包含在 Native 算子包中的编译配置。
 
