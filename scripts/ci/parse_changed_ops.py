@@ -25,7 +25,11 @@ Input format of <changed_list> (one file per line):
 Output (stdout):
     op1;op2;op3   — operators to verify
     all           — full-suite verification (a shared file changed)
-    ""            — no operator affected
+    ""            — no operator affected (or the skip_all_tests switch is on)
+
+``skip_all_tests`` in the rule file is an escape hatch for landing windows: when
+it is ``true`` the changed files are not analysed and no operator test runs,
+while the remaining pipeline stages keep working.
 """
 
 import argparse
@@ -108,6 +112,18 @@ def load_ignored_paths(config_path):
     return {Path(path) for path in ignored}
 
 
+def is_test_skipped(config_path):
+    """Return True when the global 'skip_all_tests' switch is turned on.
+
+    The switch is meant for landing windows with a large batch of pending
+    changes: the pipeline still runs, but no operator is verified.
+    """
+    with open(config_path, encoding="utf-8") as f:
+        desc = yaml.safe_load(f) or {}
+
+    return bool(desc.get("skip_all_tests", False))
+
+
 def is_skippable(file_path):
     return file_path.endswith(_SKIP_SUFFIXES)
 
@@ -184,6 +200,13 @@ def main():
     if not args.config.exists():
         logger.error("config file not found: %s", args.config)
         return 1, ""
+
+    if is_test_skipped(args.config):
+        logger.warning(
+            "skip_all_tests is enabled in %s: no operator test will run",
+            args.config,
+        )
+        return 0, ""
 
     modules = load_modules(args.config)
     ignored_paths = load_ignored_paths(args.config)
