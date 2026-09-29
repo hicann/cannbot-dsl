@@ -4,11 +4,11 @@ pageClass: api-index-page
 
 # API 文档
 
-CANNBot-DSL 提供 Host、Kernel 和 AI CPU 三类公共 Python 接口，并通过 OpKit 提供算子编译、发布和 ACLNN 接口声明能力。文档按照接口的调用位置与执行模型分类，并在各分类下按照功能模块组织。
+CANNBot-DSL 提供 Host、Kernel 和 AI CPU 三类公共 Python 接口，通过 `cannbotdsl.aot` 提供提前编译和 Native 算子包发布能力。文档按照接口的调用位置与执行模型分类，并在各分类下按照功能模块组织。
 
 ## 装饰器
 
-[装饰器](/api/decorators)页面集中介绍 CANNBot-DSL 与 OpKit 提供的八个装饰器，包括 `@host`、`@jit`、`@kernel`、`@datastruct`、`@aicpu_kernel`、`@compile_cache`、`@export` 和 `@aclnn`。
+[装饰器](/api/decorators)页面集中介绍 CANNBot-DSL 提供的六个装饰器，包括 `@host`、`@jit`、`@kernel`、`@datastruct`、`@aicpu_kernel` 和 `@export`。
 
 ## API 分类
 
