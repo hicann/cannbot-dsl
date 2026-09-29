@@ -11,6 +11,7 @@
 operators:
   - voxel_conv
   - flash_attn
+  - flash_mla_with_kvcache
   - flash_kda
   - matmul
   - matmul/batch_matmul
@@ -24,3 +25,7 @@ operators:
   - qsa_indexer
   - flash_attn_fp8_fullquant
   - sparse_flash_attention
+  - indexer_prologue_k
+  - engram_gate
+  - quant_block_sparse_attn
+  - indexer_prologue_qw

@@ -28,6 +28,7 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 | flash_attn_fp8_fullquant | FP8 全量化 Attention，支持 GQA 与分页 KV Cache | [samples/flash_attn_fp8_fullquant](samples/flash_attn_fp8_fullquant) |
 | stem_indexer | 稀疏 Attention 选块，包含 AICPU metadata | [samples/stem_indexer](samples/stem_indexer) |
 | qsa_indexer | 压缩 Key 稀疏索引，包含 AICPU metadata | [samples/qsa_indexer](samples/qsa_indexer) |
+| indexer_prologue_qw | MXFP8 Q GEMM、尾部 RoPE、MXFP4 量化，以及 BF16 W GEMM | [samples/indexer_prologue_qw](samples/indexer_prologue_qw) |
 | flash_kda | Kimi Delta Attention prefill 融合算子 | [samples/flash_kda](samples/flash_kda) |
 | flash_kda_metadata | FlashKDA 调度 metadata 生成（AICPU） | [samples/flash_kda_metadata](samples/flash_kda_metadata) |
 | fused_recurrent_kda_snapshot | Kimi Delta Attention decode（1～8 token，状态快照） | [samples/fused_recurrent_kda_snapshot](samples/fused_recurrent_kda_snapshot) |
@@ -38,6 +39,8 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 | pointnet_sa | $\text{feat}[K, D_{out}] = \max_{j} \text{MLP}(\text{points}[K, j, D_{in}])$ | [samples/pointnet_sa](samples/pointnet_sa) |
 | rms_norm | $y = x \cdot rstd \cdot \gamma$ | [samples/rms_norm](samples/rms_norm) |
 | kv_compress_epilog | KV Cache 压缩、量化与按槽位原地更新 | [samples/kv_compress_epilog](samples/kv_compress_epilog) |
+| indexer_prologue_k | Latent 投影、RMSNorm、RoPE 与 MXFP4 分页 cache 写入 | [samples/indexer_prologue_k](samples/indexer_prologue_k) |
+| engram_gate | Engram 残差门：双路 RMS、signed-sqrt sigmoid 门控与残差更新 | [samples/engram_gate](samples/engram_gate) |
 
 ## 目录结构
 
@@ -49,6 +52,7 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 │   ├── flash_attn_fp8_fullquant/ # FP8 全量化 Attention
 │   ├── stem_indexer/   # Stem Indexer 与 metadata
 │   ├── qsa_indexer/    # QSA Indexer 与 metadata
+│   ├── indexer_prologue_qw/ # Indexer prologue：Q 量化与 W GEMM
 │   ├── flash_kda/      # Kimi Delta Attention
 │   ├── flash_kda_metadata/ # FlashKDA 调度 metadata（AICPU）
 │   ├── fused_recurrent_kda_snapshot/ # KDA decode 状态快照
@@ -66,6 +70,7 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 │   ├── flash_attn_fp8_fullquant/
 │   ├── stem_indexer/
 │   ├── qsa_indexer/
+│   ├── indexer_prologue_qw/
 │   ├── flash_kda/
 │   ├── flash_kda_metadata/
 │   ├── fused_recurrent_kda_snapshot/

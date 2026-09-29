@@ -148,6 +148,47 @@ sparse_flash_attention:
   options:
     - sparse_flash_attention
 
+
+indexer_prologue_k:
+  module: True
+  src:
+    - samples/indexer_prologue_k
+    - test/indexer_prologue_k
+  options:
+    - indexer_prologue_k
+
+engram_gate:
+  module: True
+  src:
+    - samples/engram_gate
+    - test/engram_gate
+  options:
+    - engram_gate
+
+quant_block_sparse_attn:
+  module: True
+  src:
+    - samples/quant_block_sparse_attn
+    - test/quant_block_sparse_attn
+  options:
+    - quant_block_sparse_attn
+
+indexer_prologue_qw:
+  module: True
+  src:
+    - samples/indexer_prologue_qw
+    - test/indexer_prologue_qw
+  options:
+    - indexer_prologue_qw
+
+flash_mla_with_kvcache:
+  module: True
+  src:
+    - samples/flash_mla_with_kvcache
+    - test/flash_mla_with_kvcache
+  options:
+    - flash_mla_with_kvcache
+    
 shared:
   module: True
   src:
