@@ -29,9 +29,9 @@ NPU 上 `wqb`、`ww` 必须在加载权重时调用一次 `to_nz()` 转为 FRACT
 ## 运行
 
 ```bash
-source /home/h00801112/workspaces/tools/ENTER/etc/profile.d/conda.sh
-conda activate hanrui
-source /home/h00801112/codex/AscendC/cann/bin/setenv.bash
+source /xxxx/workspaces/tools/ENTER/etc/profile.d/conda.sh
+conda activate xxxx
+source /xxxx/codex/AscendC/cann/bin/setenv.bash
 # 在仓库根目录运行；test 路径仅用于下面示例的输入构造工具。
 export PYTHONPATH="$PWD/samples:$PWD/test/indexer_prologue_qw${PYTHONPATH:+:$PYTHONPATH}"
 ```
