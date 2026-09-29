@@ -12,7 +12,7 @@ export default defineConfig({
   title: 'CANNBot-DSL',
   description: '面向 Ascend NPU 的算子开发项目文档',
   base: process.env.DOCS_BASE || '/',
-  cleanUrls: false,
+  cleanUrls: true,
   lastUpdated: true,
   markdown: {
     math: true
@@ -35,30 +35,62 @@ export default defineConfig({
       ] }
     ],
     sidebar: {
-      '/getting-started/': [{ text: '开始使用', items: guideSidebar }],
-      '/guide/': [{ text: '项目指南', items: guideSidebar }],
-      '/examples/': [{ text: '样例', items: [
+      '/getting-started/': [{ text: '开始使用', collapsed: true, items: guideSidebar }],
+      '/guide/': [{ text: '项目指南', collapsed: true, items: guideSidebar }],
+      '/examples/': [{ text: '样例', collapsed: true, items: [
         { text: '样例导航', link: '/examples/' },
         { text: '运行测试', link: '/examples/testing' }
       ] }],
       '/api/': [{
         text: 'API 文档',
+        collapsed: true,
         link: '/api/',
         items: [
-          { text: '装饰器', link: '/api/decorators' },
-          { text: 'Host API', link: '/api/host/', collapsed: false, items: [
-            { text: '平台信息', link: '/api/host/platform-profiling/', collapsed: false, items: [
+          { text: 'Host API', link: '/api/host/', collapsed: true, items: [
+            { text: 'Host API 概览', link: '/api/host/' },
+            { text: '参数与数据描述', link: '/api/host/data-description/README', collapsed: true, items: [
+              { text: 'Dim', link: '/api/host/data-description/dim' },
+              { text: 'TensorSpec', link: '/api/host/data-description/tensor_spec' },
+              { text: 'TensorListSpec', link: '/api/host/data-description/tensor_list_spec' }
+            ] },
+            { text: '平台信息', link: '/api/host/platform-profiling/', collapsed: true, items: [
               { text: 'get_platform_info', link: '/api/host/platform-profiling/get-platform-info' },
               { text: 'get_mem_size', link: '/api/host/platform-profiling/get-mem-size' }
             ] }
           ] },
-          { text: 'Kernel API', link: '/api/kernel/', collapsed: false, items: [
+          { text: 'Kernel API', link: '/api/kernel/', collapsed: true, items: [
+            { text: 'Kernel API 概览', link: '/api/kernel/' },
             { text: '基本数据类型与操作', link: '/api/kernel/base/', collapsed: false, items: [
               { text: 'tile_slice', link: '/api/kernel/base/tile-slice' }
             ] },
-            { text: '数据搬运', link: '/api/kernel/data-movement/', collapsed: false, items: [
-              { text: 'make_copy_engine', link: '/api/kernel/data-movement/make-copy-engine' },
-              { text: 'mem_copy', link: '/api/kernel/data-movement/mem-copy' }
+            { text: '类型与相关接口', link: '/api/kernel/types-and-views/types-and-related-interfaces', collapsed: true, items: [
+              { text: 'Shape 类型', link: '/api/kernel/types-and-views/shape' },
+              { text: 'Stride 类型', link: '/api/kernel/types-and-views/stride' },
+              { text: 'Layout 类型', link: '/api/kernel/types-and-views/layout' },
+              { text: 'Tiler 类型', link: '/api/kernel/types-and-views/tiler' },
+              { text: 'Coord 类型', link: '/api/kernel/types-and-views/coord' },
+              { text: 'Tensor 类型', link: '/api/kernel/types-and-views/tensor' },
+              { text: 'Buffer 类型', link: '/api/kernel/types-and-views/buffer' },
+              { text: 'Channel 类型', link: '/api/kernel/types-and-views/channel' },
+              { text: 'DelayLineGroup 类型', link: '/api/kernel/types-and-views/delay-line-group' },
+              { text: 'make_tiler', link: '/api/kernel/types-and-views/make_tiler' },
+              { text: 'make_buffer', link: '/api/kernel/types-and-views/make_buffer' },
+              { text: 'make_channel', link: '/api/kernel/types-and-views/make_channel' },
+              { text: 'channel_rewind', link: '/api/kernel/types-and-views/channel_rewind' },
+              { text: 'idx2crd', link: '/api/kernel/types-and-views/idx2crd' },
+              { text: 'ceil_div', link: '/api/kernel/types-and-views/ceil_div' }
+            ] },
+            { text: '控制流', link: '/api/kernel/control-flow/control-flow', collapsed: true, items: [
+              { text: '判断条件', link: '/api/kernel/control-flow/predicate-expressions' },
+              { text: '值选择', link: '/api/kernel/control-flow/value-selection' },
+              { text: 'if', link: '/api/kernel/control-flow/if' },
+              { text: 'for', link: '/api/kernel/control-flow/for' },
+              { text: 'while', link: '/api/kernel/control-flow/while' },
+              { text: '编译期控制', link: '/api/kernel/control-flow/compile-time-control' }
+            ] },
+            { text: '数据搬运', link: '/api/kernel/data-movement/', collapsed: true, items: [
+              { text: 'mem_copy', link: '/api/kernel/data-movement/mem-copy' },
+              { text: 'make_copy_engine', link: '/api/kernel/data-movement/make-copy-engine' }
             ] },
             { text: 'Reg矢量计算', link: '/api/kernel/reg_compute/', collapsed: true, items: [
               { text: '概述', link: '/api/kernel/reg_compute/overview' },
@@ -264,6 +296,7 @@ export default defineConfig({
                 { text: 'UnitFlag', link: '/api/kernel/cube_compute/key-features-unit-flag' }
               ] },
               { text: 'enable_fp8', link: '/api/kernel/cube_compute/enable-fp8' },
+              { text: 'enable_hf32_trans', link: '/api/kernel/cube_compute/enable-hf32-trans' },
               { text: 'enable_hf32', link: '/api/kernel/cube_compute/enable-hf32' },
               { text: 'enable_hif8', link: '/api/kernel/cube_compute/enable-hif8' },
               { text: 'matmul', link: '/api/kernel/cube_compute/matmul' },
@@ -271,7 +304,7 @@ export default defineConfig({
               { text: 'set_hf32_round_mode', link: '/api/kernel/cube_compute/set-hf32-round-mode' },
               { text: 'set_mmad_direction', link: '/api/kernel/cube_compute/set-mmad-direction' }
             ] },
-            { text: '系统变量访问', link: '/api/kernel/system/', collapsed: false, items: [
+            { text: '系统变量访问', link: '/api/kernel/system/', collapsed: true, items: [
               { text: 'get_block_idx', link: '/api/kernel/system/get-block-idx' },
               { text: 'get_block_num', link: '/api/kernel/system/get-block-num' },
               { text: 'get_subblock_id', link: '/api/kernel/system/get-subblock-id' },
@@ -282,14 +315,14 @@ export default defineConfig({
               { text: 'get_vf_len', link: '/api/kernel/system/get-vf-len' },
               { text: 'get_squeeze_status', link: '/api/kernel/system/get-squeeze-status' }
             ] },
-            { text: '同步与缓存控制', link: '/api/kernel/synchronization-cache/', collapsed: false, items: [
+            { text: '同步与缓存控制', link: '/api/kernel/synchronization-cache/', collapsed: true, items: [
               { text: '概述', link: '/api/kernel/synchronization-cache/overview' },
               { text: 'dcci_single', link: '/api/kernel/synchronization-cache/dcci-single' },
               { text: 'dcci_entire_out', link: '/api/kernel/synchronization-cache/dcci-entire-out' },
               { text: 'dcci_entire_atomic', link: '/api/kernel/synchronization-cache/dcci-entire-atomic' },
               { text: 'dci', link: '/api/kernel/synchronization-cache/dci' }
             ] },
-            { text: '同步管理', link: '/api/kernel/resource-management/', collapsed: false, items: [
+            { text: '同步管理', link: '/api/kernel/resource-management/', collapsed: true, items: [
               { text: '系统同步能力概述', link: '/api/kernel/resource-management/system-sync-overview' },
               { text: '核间同步能力概述', link: '/api/kernel/resource-management/inter-core-sync-overview' },
               { text: '关键特性说明', link: '/api/kernel/resource-management/key-features' },
@@ -311,10 +344,10 @@ export default defineConfig({
           { text: '通用接口文档模板', link: '/api/api-template' },
         ]
       }],
-      '/community/': [{ text: '社区', items: [
+      '/community/': [{ text: '社区', collapsed: true, items: [
         { text: '参与贡献', link: '/community/contributing' }
       ] }],
-      '/about/': [{ text: '关于', items: [
+      '/about/': [{ text: '关于', collapsed: true, items: [
         { text: '文档范围', link: '/about/scope' },
         { text: '发布与部署', link: '/about/deployment' }
       ] }]
