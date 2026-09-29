@@ -108,6 +108,14 @@ kv_compress_epilog:
   options:
     - kv_compress_epilog
 
+qwen_sparse_attn:
+  module: True
+  src:
+    - samples/qwen_sparse_attn
+    - test/qwen_sparse_attn
+  options:
+    - qwen_sparse_attn
+
 stem_indexer:
   module: True
   src:
