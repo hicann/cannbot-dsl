@@ -24,6 +24,9 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 | :--- | :--- | :--- |
 | voxel_conv | $C[N, Co, Ho, Wo] = \text{VoxelConv}(x, filter)$ | [samples/voxel_conv](samples/voxel_conv) |
 | flash_attn | $O = softmax(QK^T \cdot scale) V$ | [samples/flash_attn](samples/flash_attn) |
+| flash_attn_fp8_fullquant | FP8 全量化 Attention，支持 GQA 与分页 KV Cache | [samples/flash_attn_fp8_fullquant](samples/flash_attn_fp8_fullquant) |
+| stem_indexer | 稀疏 Attention 选块，包含 AICPU metadata | [samples/stem_indexer](samples/stem_indexer) |
+| qsa_indexer | 压缩 Key 稀疏索引，包含 AICPU metadata | [samples/qsa_indexer](samples/qsa_indexer) |
 | flash_kda | Kimi Delta Attention prefill 融合算子 | [samples/flash_kda](samples/flash_kda) |
 | flash_kda_metadata | FlashKDA 调度 metadata 生成（AICPU） | [samples/flash_kda_metadata](samples/flash_kda_metadata) |
 | fused_recurrent_kda_snapshot | Kimi Delta Attention decode（1～8 token，状态快照） | [samples/fused_recurrent_kda_snapshot](samples/fused_recurrent_kda_snapshot) |
@@ -41,6 +44,9 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 ├── samples/            # 算子实现与使用说明
 │   ├── voxel_conv/     # VoxelConv 卷积
 │   ├── flash_attn/     # Flash Attention
+│   ├── flash_attn_fp8_fullquant/ # FP8 全量化 Attention
+│   ├── stem_indexer/   # Stem Indexer 与 metadata
+│   ├── qsa_indexer/    # QSA Indexer 与 metadata
 │   ├── flash_kda/      # Kimi Delta Attention
 │   ├── flash_kda_metadata/ # FlashKDA 调度 metadata（AICPU）
 │   ├── fused_recurrent_kda_snapshot/ # KDA decode 状态快照
@@ -55,6 +61,9 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 ├── test/               # 测试
 │   ├── voxel_conv/
 │   ├── flash_attn/
+│   ├── flash_attn_fp8_fullquant/
+│   ├── stem_indexer/
+│   ├── qsa_indexer/
 │   ├── flash_kda/
 │   ├── flash_kda_metadata/
 │   ├── fused_recurrent_kda_snapshot/

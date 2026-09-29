@@ -19,3 +19,6 @@ operators:
   - kv_compress_epilog
   - matmul/quant_matmul
   - grouped_matmul
+  - stem_indexer
+  - qsa_indexer
+  - flash_attn_fp8_fullquant

@@ -108,6 +108,30 @@ kv_compress_epilog:
   options:
     - kv_compress_epilog
 
+stem_indexer:
+  module: True
+  src:
+    - samples/stem_indexer
+    - test/stem_indexer
+  options:
+    - stem_indexer
+
+qsa_indexer:
+  module: True
+  src:
+    - samples/qsa_indexer
+    - test/qsa_indexer
+  options:
+    - qsa_indexer
+
+flash_attn_fp8_fullquant:
+  module: True
+  src:
+    - samples/flash_attn_fp8_fullquant
+    - test/flash_attn_fp8_fullquant
+  options:
+    - flash_attn_fp8_fullquant
+
 shared:
   module: True
   src:
