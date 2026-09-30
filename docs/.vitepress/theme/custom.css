@@ -430,3 +430,11 @@
     transform: none;
   }
 }
+
+/* 尝鲜版本提示：由 theme/index.ts 注入到 /api/** 各页正文之前 */
+.preview-notice {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--vp-c-text-3);
+}
