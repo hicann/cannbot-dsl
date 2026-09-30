@@ -131,7 +131,7 @@ python -m pytest test/flash_attn/test_flash_attn_metadata.py -v
 
 ## 性能对比
 
-![Flash Attn(DSL) 与 Flash Attn(CANN built-in ASC) 性能对比](../../media/flash_attn.png)
+![Flash Attn(DSL) 与 Flash Attn(CANN built-in ASC) 性能对比](../../figures/flash_attn.png)
 
 图中展示 10 个用例的 kernel 性能，按 CANN 主线耗时从小到大排列。
 加速比为 CANN built-in ASC / DSL，大于 1 表示 DSL 更快；
