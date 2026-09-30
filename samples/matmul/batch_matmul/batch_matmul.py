@@ -21,18 +21,17 @@ import dataclasses
 import os
 
 import torch
-from cannbotdsl import (
-    MemLoc, Tensor, dtypes, get_mem_size, get_platform_info,
-    make_copy_engine, mem_copy, tile_slice as tile_view,
-)
-from cannbotdsl.ops.arch import get_block_idx, get_block_num
+from cannbotdsl import dtypes, get_mem_size, get_platform_info
 from cannbotdsl.channel import Channel
 from cannbotdsl.lang.constexpr import const_expr
+from cannbotdsl.lang.host import host
 from cannbotdsl.lang.jit import jit
 from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.arch import get_block_idx, get_block_num
 from cannbotdsl.ops.cube import enable_hf32, set_fp32_mode
 from cannbotdsl.ops.matmul import matmul as dsl_matmul
-from cannbotdsl.tensor import ceil_div
+from cannbotdsl.ops.memcpy import make_copy_engine, mem_copy
+from cannbotdsl.tensor import MemLoc, Tensor, ceil_div, tile_slice
 
 
 # ============================================================================
@@ -114,10 +113,12 @@ def _decode_batch_terms(src_batch, c_batch):
     ps = (1,) * (n - len(src_batch)) + tuple(int(d) for d in src_batch)
 
     divs = [1] * n
+    muls = [1] * (n + 1)
     acc = 1
     for d in range(n - 1, -1, -1):
         divs[d] = acc
         acc *= c_batch[d]
+        muls[d] = muls[d + 1] * ps[d]
 
     full = ps == tuple(c_batch)
     terms = []
@@ -126,7 +127,7 @@ def _decode_batch_terms(src_batch, c_batch):
             continue  # broadcast dim: source coordinate is always 0
         if c_batch[d] == 1:
             continue  # extent-1 output dim: coordinate is always 0
-        terms.append((divs[d], c_batch[d], _prod(ps[d + 1:])))
+        terms.append((divs[d], c_batch[d], muls[d + 1]))
     return full, terms
 
 
@@ -180,9 +181,7 @@ def _l2_capacity_bytes() -> int:
             f"BMM_L2_SIZE_BYTES must be an integer byte count; got {raw!r}"
         ) from exc
     if value <= 0:
-        raise ValueError(
-            f"BMM_L2_SIZE_BYTES must be positive; got {value}"
-        )
+        raise ValueError(f"BMM_L2_SIZE_BYTES must be positive; got {value}")
     return value
 
 
@@ -191,18 +190,14 @@ def _l2_capacity_bytes() -> int:
 
 def _validate_inputs(a, b, hf32):
     if a.dtype != b.dtype:
-        raise TypeError(
-            f"a and b must have the same dtype, got {a.dtype} vs {b.dtype}"
-        )
+        raise TypeError(f"a and b must have the same dtype, got {a.dtype} vs {b.dtype}")
     if a.dtype not in _TORCH_DTYPE_TO_DSL:
         raise TypeError(
             f"only torch.float16, torch.bfloat16 and torch.float32 are "
             f"supported; got {a.dtype}"
         )
     if hf32 and a.dtype != torch.float32:
-        raise ValueError(
-            f"hf32=True is only valid for float32 inputs; got {a.dtype}"
-        )
+        raise ValueError(f"hf32=True is only valid for float32 inputs; got {a.dtype}")
     if a.device != b.device:
         raise ValueError(
             f"a and b must be on the same device, got {a.device} vs {b.device}"
@@ -211,8 +206,7 @@ def _validate_inputs(a, b, hf32):
         raise ValueError(f"inputs must be NPU tensors; got device {a.device}")
     if not (2 <= a.dim() <= _MAX_RANK and 2 <= b.dim() <= _MAX_RANK):
         raise ValueError(
-            f"a and b must have rank 2..{_MAX_RANK}, "
-            f"got rank {a.dim()} and {b.dim()}"
+            f"a and b must have rank 2..{_MAX_RANK}, got rank {a.dim()} and {b.dim()}"
         )
 
 
@@ -256,24 +250,19 @@ def _normalize_bias(bias, a, c_batch, n):
     if bias is None:
         return None, False, False
     if bias.device != a.device:
-        raise ValueError(
-            f"bias must be on the same device as a; got {bias.device}"
-        )
+        raise ValueError(f"bias must be on the same device as a; got {bias.device}")
     if bias.dtype not in (a.dtype, torch.float32):
         raise TypeError(
             f"bias dtype must be the input dtype or float32; got {bias.dtype}"
         )
     if bias.dim() == 1:
         if bias.shape[0] != n:
-            raise ValueError(
-                f"bias length must equal N ({n}); got {bias.shape[0]}"
-            )
+            raise ValueError(f"bias length must equal N ({n}); got {bias.shape[0]}")
         return bias, True, False
     if bias.dim() == len(c_batch) + 1:
         if tuple(bias.shape[:-1]) != c_batch or bias.shape[-1] != n:
             raise ValueError(
-                f"per-batch bias shape must be {(*c_batch, n)}; "
-                f"got {tuple(bias.shape)}"
+                f"per-batch bias shape must be {(*c_batch, n)}; got {tuple(bias.shape)}"
             )
         return bias, False, True
     raise ValueError(
@@ -311,8 +300,11 @@ def _degenerate_result(ctx: _KernelCtx):
 
     def zeros_out():
         z = torch.zeros(
-            *ctx.c_batch, ctx.m, ctx.n,
-            dtype=ctx.a_kern.dtype, device=ctx.a_kern.device,
+            *ctx.c_batch,
+            ctx.m,
+            ctx.n,
+            dtype=ctx.a_kern.dtype,
+            device=ctx.a_kern.device,
         )
         return z[0] if ctx.squeeze_out else z
 
@@ -351,8 +343,10 @@ def _pad_n_tail(ctx: _KernelCtx):
         b_kern = torch.nn.functional.pad(b_kern, (0, n_eff - n))
     if bias is not None:
         bias_pad = torch.zeros(
-            *(() if ctx.bias_shared else ctx.c_batch), n_eff,
-            dtype=bias.dtype, device=bias.device,
+            *(() if ctx.bias_shared else ctx.c_batch),
+            n_eff,
+            dtype=bias.dtype,
+            device=bias.device,
         )
         bias_pad[..., :n] = bias
         bias = bias_pad
@@ -362,7 +356,7 @@ def _pad_n_tail(ctx: _KernelCtx):
 def _reshape_output(c, c_n, ctx: _KernelCtx):
     """Slice the N pad back off (if any) and restore the batch dims."""
     if c_n != ctx.n:
-        c = c[..., :ctx.n]
+        c = c.narrow(-1, 0, ctx.n)
     if ctx.squeeze_out:
         return c[0]
     return c.reshape(*ctx.c_batch, ctx.m, ctx.n)
@@ -376,8 +370,12 @@ def _run_kernel(ctx: _KernelCtx):
     has_bias = ctx.bias is not None
     b_kern, bias, n_eff = _pad_n_tail(ctx)
     tiling = BatchMatmulTiling(
-        ctx.m, n_eff, ctx.k, dtype,
-        kern_trans_b=ctx.kern_trans_b, has_bias=has_bias,
+        ctx.m,
+        n_eff,
+        ctx.k,
+        dtype,
+        kern_trans_b=ctx.kern_trans_b,
+        has_bias=has_bias,
     )
     # Zero-copy batch flatten (contiguous views, .view never copies).
     a3 = ctx.a_kern.view(_prod(ctx.a_kern.shape[:-2]), *ctx.a_kern.shape[-2:])
@@ -477,7 +475,9 @@ class BatchMatmulTiling:
         # A/B share the dtype; bound base_k by the smaller of L0A/L0B
         # (double-buffered), both queried from the platform.
         max_k = (
-            min(self.L0A_SIZE, self.L0B_SIZE) // self.DB_SIZE // dtype_size
+            min(self.L0A_SIZE, self.L0B_SIZE)
+            // self.DB_SIZE
+            // dtype_size
             // max(self.base_m, self.base_n)
         )
         k_align = _ceil_align(self.k, self.BASIC_BLOCK_16)
@@ -491,8 +491,7 @@ class BatchMatmulTiling:
 
         max_step = min(_ceil_div(self.k, self.base_k), self.MAX_STEP_K)
         bias_l1 = (
-            self.base_n * self.DATA_SIZE_FP32 * self.DB_SIZE
-            if self.has_bias else 0
+            self.base_n * self.DATA_SIZE_FP32 * self.DB_SIZE if self.has_bias else 0
         )
         step_k = 1
         for s in range(1, max_step + 1):
@@ -569,9 +568,8 @@ class BatchMatmulKernel:
         # L2 cache-hint policy: A/B bypass only on proven reuse and only on
         # the linear nd2nz path with 128-aligned K/k_l1; C cached iff the
         # whole batched output fits L2; bias always cached.
-        aligned = (
-            (tiling.k % _L2_BYPASS_ALIGN_ELEMS == 0)
-            and (tiling.k_l1 % _L2_BYPASS_ALIGN_ELEMS == 0)
+        aligned = (tiling.k % _L2_BYPASS_ALIGN_ELEMS == 0) and (
+            tiling.k_l1 % _L2_BYPASS_ALIGN_ELEMS == 0
         )
         reuse_a = tiling.n_tiles > 1 or not ctx.a_full  # N-tile re-reads / bcast
         reuse_b = tiling.m_tiles > 1 or not ctx.b_full  # M-tile re-reads / bcast
@@ -580,8 +578,9 @@ class BatchMatmulKernel:
         self.l2_ctl_a = 1 if (reuse_a or not nd_path_a or not aligned) else 0
         self.l2_ctl_b = 1 if (reuse_b or not nd_path_b or not aligned) else 0
         self.l2_ctl_c = (
-            1 if self.bs * tiling.m * tiling.n * tiling.dtype_size
-            <= _l2_capacity_bytes() else 0
+            1
+            if self.bs * tiling.m * tiling.n * tiling.dtype_size <= _l2_capacity_bytes()
+            else 0
         )
 
         # MMAD unit flag (batch_mat_mul_v3 Normal config): 2 while
@@ -611,8 +610,7 @@ class BatchMatmulKernel:
         return tuple(padded)
 
     @kernel
-    def bmm_kernel(self, gm_a: Tensor, gm_b: Tensor, gm_c: Tensor,
-                   gm_bias: Tensor):
+    def bmm_kernel(self, gm_a: Tensor, gm_b: Tensor, gm_c: Tensor, gm_bias: Tensor):
         t = self.t
 
         # Compile-time fp32 compute-mode selection (persistent cube state).
@@ -632,12 +630,8 @@ class BatchMatmulKernel:
         """Declare the L1/L0/bias channels and the copy engines."""
         t = self.t
 
-        l1_b_shape = (
-            (t.base_n, t.k_l1) if t.kern_trans_b else (t.k_l1, t.base_n)
-        )
-        l1_a_shape = (
-            (t.k_l1, t.base_m) if self.kern_trans_a else (t.base_m, t.k_l1)
-        )
+        l1_b_shape = (t.base_n, t.k_l1) if t.kern_trans_b else (t.k_l1, t.base_n)
+        l1_a_shape = (t.k_l1, t.base_m) if self.kern_trans_a else (t.base_m, t.k_l1)
         self.l1_a = Channel(
             MemLoc.L1,
             shape=l1_a_shape,
@@ -664,12 +658,18 @@ class BatchMatmulKernel:
         # bias-only so the channel never eats into exact-fit no-bias L1.
         if const_expr(self.has_bias):
             self.l1_bias = Channel(
-                MemLoc.L1, shape=(t.base_n,), dtype=self.bias_dtype,
-                depth=2, data_format="nd",
+                MemLoc.L1,
+                shape=(t.base_n,),
+                dtype=self.bias_dtype,
+                depth=2,
+                data_format="nd",
             )
             self.l1_bt = Channel(
-                MemLoc.BIAS, shape=(t.base_n,), dtype=dtypes.float32,
-                depth=2, data_format="nd",
+                MemLoc.BIAS,
+                shape=(t.base_n,),
+                dtype=dtypes.float32,
+                depth=2,
+                data_format="nd",
             )
 
         self.eng_a = make_copy_engine(
@@ -681,17 +681,15 @@ class BatchMatmulKernel:
             self.eng_bias = make_copy_engine(format_transform="identity")
 
     @jit
-    def _compute_output_tile(self, gm_a, gm_b, gm_c, gm_bias, tile_idx):
-        """Bias load + K reduction + FIXPIPE for one output tile; tail tiles
-        are clipped by tile_view and zero-padded by the nd2nz engines.
-        """
+    def _decode_tile_batch_src(self, tile_idx):
+        """Tile-index decode: (b_idx, mn_idx) plus the broadcast-resolved flat
+        source indices (see _decode_batch_terms; full ⇒ source index equals
+        the output batch index).  mn_idx packs (m_idx, n_idx) into one scalar
+        for the 5-value coding rules (codecheck G.FNM.03/05).  Shared [N]
+        bias lives in slot 0; full-batch bias by output batch."""
         b_idx = tile_idx // self.mn_tiles
-        rem = tile_idx % self.mn_tiles
-        m_idx = rem // self.n_tiles
-        n_idx = rem % self.n_tiles
+        mn_idx = tile_idx % self.mn_tiles
 
-        # Broadcast-resolved flat batch indices (see _decode_batch_terms);
-        # full ⇒ source index equals the output batch index.
         a_src = b_idx
         if const_expr(not self.a_full):
             a_src = (
@@ -708,10 +706,20 @@ class BatchMatmulKernel:
                 + ((b_idx // self.b2[0]) % self.b2[1]) * self.b2[2]
                 + ((b_idx // self.b3[0]) % self.b3[1]) * self.b3[2]
             )
-        # Shared [N] bias lives in slot 0; full-batch bias by output batch.
         bias_src = 0
         if const_expr(self.bias_full):
             bias_src = b_idx
+        return b_idx, mn_idx, a_src, b_src, bias_src
+
+    @jit
+    def _compute_output_tile(self, gm_a, gm_b, gm_c, gm_bias, tile_idx):
+        """Bias load + K reduction + FIXPIPE for one output tile; tail tiles
+        are clipped by tile_slice and zero-padded by the nd2nz engines.
+        """
+        decoded = self._decode_tile_batch_src(tile_idx)
+        b_idx, mn_idx, a_src, b_src, bias_src = decoded
+        m_idx = mn_idx // self.n_tiles
+        n_idx = mn_idx % self.n_tiles
 
         base_m, base_n = self.t.base_m, self.t.base_n
         a2d = gm_a[a_src, None, None]
@@ -726,8 +734,9 @@ class BatchMatmulKernel:
         if const_expr(self.has_bias):
             mem_copy(
                 self.l1_bias.produce(),
-                tile_view(gm_bias[bias_src, None], (base_n,), (n_idx,)),
-                engine=self.eng_bias, l2_cache_ctl=1,
+                tile_slice(gm_bias[bias_src, None], (base_n,), (n_idx,)),
+                engine=self.eng_bias,
+                l2_cache_ctl=1,
             )
             mem_copy(self.l1_bt.produce(), self.l1_bias.consume())
             bias = self.l1_bt.consume()
@@ -737,45 +746,68 @@ class BatchMatmulKernel:
         # mn_idx packs (m_idx, n_idx) into one scalar purely to keep
         # _k_reduction within the repo's 5-formal-parameter coding rule
         # (codecheck G.FNM.03); it is a rule workaround, not business design.
-        self._k_reduction(a2d, b2d, c_w, bias, m_idx * self.n_tiles + n_idx)
+        self._k_reduction(a2d, b2d, c_w, bias, mn_idx)
 
-        gm_c_tile = tile_view(c2d, (base_m, base_n), (m_idx, n_idx))
+        gm_c_tile = tile_slice(c2d, (base_m, base_n), (m_idx, n_idx))
         if const_expr(self.use_unit_flag):
             # Unit-flag path: the FIXPIPE reads the produce alias; a
             # consume() read would desync against the auto-triggered FIXPIPE.
-            mem_copy(gm_c_tile, c_w, engine=self.eng_c, unit_flag=3,
-                     l2_cache_ctl=self.l2_ctl_c)
+            mem_copy(
+                gm_c_tile,
+                c_w,
+                engine=self.eng_c,
+                unit_flag=3,
+                l2_cache_ctl=self.l2_ctl_c,
+            )
         else:
             mem_copy(gm_c_tile, self.l0c.consume(), l2_cache_ctl=self.l2_ctl_c)
+
+    @jit
+    def _load_ab_l1(self, a2d, b2d, k_l1_idx, mn_idx):
+        """GM -> L1 copies of one k_l1 segment for both operands (mn_idx packs
+        (m_idx, n_idx) for the 5-arg coding rule)."""
+        m_idx = mn_idx // self.n_tiles
+        n_idx = mn_idx % self.n_tiles
+        t = self.t
+        base_m, base_n = t.base_m, t.base_n
+        k_l1 = t.k_l1
+
+        if const_expr(self.kern_trans_a):
+            gm_a_tile = tile_slice(a2d, (k_l1, base_m), (k_l1_idx, m_idx))
+        else:
+            gm_a_tile = tile_slice(a2d, (base_m, k_l1), (m_idx, k_l1_idx))
+        mem_copy(
+            self.l1_a.produce(),
+            gm_a_tile,
+            engine=self.eng_a,
+            l2_cache_ctl=self.l2_ctl_a,
+        )
+
+        if const_expr(t.kern_trans_b):
+            gm_b_tile = tile_slice(b2d, (base_n, k_l1), (n_idx, k_l1_idx))
+        else:
+            gm_b_tile = tile_slice(b2d, (k_l1, base_n), (k_l1_idx, n_idx))
+        mem_copy(
+            self.l1_b.produce(),
+            gm_b_tile,
+            engine=self.eng_b,
+            l2_cache_ctl=self.l2_ctl_b,
+        )
 
     @jit
     def _k_reduction(self, a2d, b2d, c_w, bias, mn_idx):
         """GM → L1 → L0 K reduction and MMAD accumulation for one tile
         (mn_idx packs (m_idx, n_idx) for the 5-arg coding rule)."""
-        m_idx = mn_idx // self.n_tiles
-        n_idx = mn_idx % self.n_tiles
         t = self.t
         base_m, base_n = t.base_m, t.base_n
         base_k, k_l1, k_total = t.base_k, t.k_l1, t.k
         last_l1_idx = self.k_l1_tiles - 1
 
         for k_l1_idx in range(self.k_l1_tiles):
-            if const_expr(self.kern_trans_a):
-                gm_a_tile = tile_view(a2d, (k_l1, base_m), (k_l1_idx, m_idx))
-            else:
-                gm_a_tile = tile_view(a2d, (base_m, k_l1), (m_idx, k_l1_idx))
+            self._load_ab_l1(a2d, b2d, k_l1_idx, mn_idx)
             # One consume per k_l1 segment: the inner loop slices the selected
             # alias (a consume per slice would rotate the cursor off the slot).
-            mem_copy(self.l1_a.produce(), gm_a_tile, engine=self.eng_a,
-                     l2_cache_ctl=self.l2_ctl_a)
             a_l1 = self.l1_a.consume()
-
-            if const_expr(t.kern_trans_b):
-                gm_b_tile = tile_view(b2d, (base_n, k_l1), (n_idx, k_l1_idx))
-            else:
-                gm_b_tile = tile_view(b2d, (k_l1, base_n), (k_l1_idx, n_idx))
-            mem_copy(self.l1_b.produce(), gm_b_tile, engine=self.eng_b,
-                     l2_cache_ctl=self.l2_ctl_b)
             b_l1 = self.l1_b.consume()
 
             # The final k_l1 segment carries only its valid base_k blocks.
@@ -783,31 +815,38 @@ class BatchMatmulKernel:
             k_l0_per_l1 = ceil_div(min(k_l1, k_remaining), base_k)
             for k_l0_idx in range(k_l0_per_l1):
                 if const_expr(self.kern_trans_a):
-                    l1_a_slice = tile_view(a_l1, (base_k, base_m), (k_l0_idx, 0))
+                    l1_a_slice = tile_slice(a_l1, (base_k, base_m), (k_l0_idx, 0))
                 else:
-                    l1_a_slice = tile_view(a_l1, (base_m, base_k), (0, k_l0_idx))
+                    l1_a_slice = tile_slice(a_l1, (base_m, base_k), (0, k_l0_idx))
                 a_l0 = self.l0a.produce()
                 mem_copy(a_l0, l1_a_slice)
 
                 if const_expr(t.kern_trans_b):
-                    l1_b_slice = tile_view(b_l1, (base_n, base_k), (0, k_l0_idx))
+                    l1_b_slice = tile_slice(b_l1, (base_n, base_k), (0, k_l0_idx))
                     b_l0 = self.l0b.produce()
                     mem_copy(b_l0, l1_b_slice, transpose=False)
                 else:
-                    l1_b_slice = tile_view(b_l1, (base_k, base_n), (k_l0_idx, 0))
+                    l1_b_slice = tile_slice(b_l1, (base_k, base_n), (k_l0_idx, 0))
                     b_l0 = self.l0b.produce()
                     mem_copy(b_l0, l1_b_slice, transpose=True)
 
-                is_first_k_block = (k_l1_idx == 0 and k_l0_idx == 0)
+                is_first_k_block = k_l1_idx == 0 and k_l0_idx == 0
                 unit_flag = 0
                 if const_expr(self.use_unit_flag):
-                    is_last_k_block = (k_l1_idx == last_l1_idx
-                                       and k_l0_idx == k_l0_per_l1 - 1)
+                    is_last_k_block = (
+                        k_l1_idx == last_l1_idx and k_l0_idx == k_l0_per_l1 - 1
+                    )
                     unit_flag = 3 if is_last_k_block else 2
-                dsl_matmul(c_w, a_l0, b_l0, init=is_first_k_block,
-                           bias=bias, unit_flag=unit_flag)
+                dsl_matmul(
+                    c_w,
+                    a_l0,
+                    b_l0,
+                    init=is_first_k_block,
+                    bias=bias,
+                    unit_flag=unit_flag,
+                )
 
-    @jit
+    @host
     def run(self, gm_a: Tensor, gm_b: Tensor, gm_c: Tensor, gm_bias: Tensor):
         self.bmm_kernel[self.used_core_num](gm_a, gm_b, gm_c, gm_bias)
 
@@ -855,11 +894,23 @@ def batch_matmul(
     bias, bias_shared, bias_full = _normalize_bias(bias, a, c_batch, n)
 
     ctx = _KernelCtx(
-        a_kern=a_kern, b_kern=b_kern, bias=bias, c_batch=c_batch,
-        m=m, n=n, k=k, hf32=hf32,
-        kern_trans_a=a_transposed, kern_trans_b=not b_transposed,
-        a_full=a_full, a_terms=a_terms, b_full=b_full, b_terms=b_terms,
-        bias_shared=bias_shared, bias_full=bias_full, squeeze_out=squeeze_out,
+        a_kern=a_kern,
+        b_kern=b_kern,
+        bias=bias,
+        c_batch=c_batch,
+        m=m,
+        n=n,
+        k=k,
+        hf32=hf32,
+        kern_trans_a=a_transposed,
+        kern_trans_b=not b_transposed,
+        a_full=a_full,
+        a_terms=a_terms,
+        b_full=b_full,
+        b_terms=b_terms,
+        bias_shared=bias_shared,
+        bias_full=bias_full,
+        squeeze_out=squeeze_out,
     )
     out = _degenerate_result(ctx)
     if out is not None:

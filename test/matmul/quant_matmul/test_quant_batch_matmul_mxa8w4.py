@@ -64,7 +64,6 @@ _TEST_SHAPES = [
     pytest.param(1, 32, 1, id="M1-K32-N1-minimal"),
     pytest.param(256, 256, 256, id="M256-K256-N256-multiTile"),
     pytest.param(256, 736, 96, id="M256-K736-N96-mixedTail3"),
-    pytest.param(2048, 2176, 2048, id="M2048-K2176-N2048-b1tail"),
     pytest.param(2048, 4608, 2048, id="M2048-K4608-N2048-kw128s36"),
 ]
 

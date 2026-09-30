@@ -25,10 +25,10 @@ from cannbotdsl.ops.arch import get_block_idx, get_block_num
 from cannbotdsl.channel import Channel
 
 
-from cannbotdsl.lang.jit import jit
+from cannbotdsl.lang.host import host
 from cannbotdsl.lang.kernel import kernel
 from cannbotdsl.ops.matmul import matmul as dsl_matmul
-from cannbotdsl.tensor import tile_view
+from cannbotdsl.tensor import tile_slice
 from cannbotdsl import MemLoc, Tensor
 from cannbotdsl.ops.memcpy import make_copy_engine, mem_copy
 
@@ -669,12 +669,8 @@ class MatmulKernel:
             MemLoc.L0C, shape=(t.base_m, t.base_n), dtype=dtypes.float32, depth=t.l0c_db
         )
 
-        nd2nz_engine_a = make_copy_engine(
-            format_transform="nd2nz", dtype=t.a_dtype, pad_value=0.0
-        )
-        nd2nz_engine_b = make_copy_engine(
-            format_transform="nd2nz", dtype=t.b_dtype, pad_value=0.0
-        )
+        nd2nz_engine_a = make_copy_engine(format_transform="nd2nz")
+        nd2nz_engine_b = make_copy_engine(format_transform="nd2nz")
 
         n_tiles = self.n_tiles
         main_window = self.main_window
@@ -702,36 +698,46 @@ class MatmulKernel:
 
             n_idx = (n_tiles - 1 - n_idx) if (row_idx % 2 != 0) else n_idx
 
+            l0c_acc = l0c.produce()
             for k_l1_idx in range(k_l1_tiles):
-                gm_a_tile = tile_view(gm_a, (t.base_m, t.k_l1), (m_idx, k_l1_idx))
-                gm_b_tile = tile_view(gm_b, (t.base_n, t.k_l1), (n_idx, k_l1_idx))
+                gm_a_tile = tile_slice(gm_a, (t.base_m, t.k_l1), (m_idx, k_l1_idx))
+                gm_b_tile = tile_slice(gm_b, (t.base_n, t.k_l1), (n_idx, k_l1_idx))
                 mem_copy(
-                    l1_a,
+                    l1_a.produce(),
                     gm_a_tile,
                     engine=nd2nz_engine_a,
                     l2_cache_ctl=self.l2_cache_ctl_a,
                 )
+                l1_a_tensor = l1_a.consume()
                 mem_copy(
-                    l1_b,
+                    l1_b.produce(),
                     gm_b_tile,
                     engine=nd2nz_engine_b,
                     l2_cache_ctl=self.l2_cache_ctl_b,
                 )
+                l1_b_tensor = l1_b.consume()
 
                 for k_l0_idx in range(k_l0_per_l1):
-                    l1_a_slice = tile_view(l1_a, (t.base_m, t.base_k), (0, k_l0_idx))
-                    l1_b_slice = tile_view(l1_b, (t.base_n, t.base_k), (0, k_l0_idx))
-                    mem_copy(l0a, l1_a_slice)
-                    mem_copy(l0b, l1_b_slice)
+                    l1_a_slice = tile_slice(
+                        l1_a_tensor, (t.base_m, t.base_k), (0, k_l0_idx)
+                    )
+                    l1_b_slice = tile_slice(
+                        l1_b_tensor, (t.base_n, t.base_k), (0, k_l0_idx)
+                    )
+                    mem_copy(l0a.produce(), l1_a_slice)
+                    l0a_tensor = l0a.consume()
+                    mem_copy(l0b.produce(), l1_b_slice)
+                    l0b_tensor = l0b.consume()
                     global_k = k_l1_idx * k_l0_per_l1 + k_l0_idx
-                    dsl_matmul(l0c, l0a, l0b, init=(global_k == 0))
+                    dsl_matmul(l0c_acc, l0a_tensor, l0b_tensor, init=(global_k == 0))
+            l0c_tensor = l0c_acc
 
-            gm_c_tile = tile_view(gm_c, (t.base_m, t.base_n), (m_idx, n_idx))
-            mem_copy(gm_c_tile, l0c)
+            gm_c_tile = tile_slice(gm_c, (t.base_m, t.base_n), (m_idx, n_idx))
+            mem_copy(gm_c_tile, l0c_tensor)
 
     # JIT wrapper used by the Python interface. The bracket syntax launches the
     # kernel with the number of AIC cores selected by host-side tiling.
-    @jit
+    @host
     def run(self, gm_a: Tensor, gm_b: Tensor, gm_c: Tensor):
         self.matmul_kernel[self.t.used_core_num](gm_a, gm_b, gm_c)
 

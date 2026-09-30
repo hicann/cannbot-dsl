@@ -19,7 +19,7 @@ $$
 | bias       | 可选加性偏置，经 BT（Bias Table）折入 init MMAD（只加一次）；`[N]` 共享（广播到 M 与 batch）或 `[*c_batch, N]` 逐 batch（需与输出 batch 精确匹配，BatchMatMulV3 契约）；dtype 为 fp32 或输入 dtype |
 | 输入       | a/b 需 contiguous 或 canonical 转置视图（其余非连续布局拒绝） |
 | 多核并行   | 展平 batch×M×N tile 空间线性 stride 调度（grid = min(tile 总数, 平台 cube 核数，dav-3510 为 28)，batch 数任意） |
-| 尾块处理   | `tile_view` 裁剪 + ND2NZ 引擎零填充，M/N/K 任意值 |
+| 尾块处理   | `tile_slice` 裁剪 + ND2NZ 引擎零填充，M/N/K 任意值 |
 | L2 hint    | 逐 copy `l2_cache_ctl` 策略：A/B 默认旁路、按复用分析（跨 tile 重读 / broadcast）使能，含 nd2nz 方向 + 128 元素对齐守卫；C 按容量使能；bias 恒使能 |
 | 支持架构   | NPU ARCH 3510（Ascend 950PR / Ascend 950DT） |
 
@@ -124,4 +124,4 @@ pytest test/matmul/batch_matmul/test_batch_matmul.py -v
 
 - 大方形 fp16/fp32 与主线差距 1.1~1.25×（残余为主线策略矩阵：尾块分裂 / StreamK / ND_FIXPIPE AIV 协同回写）；深批量小矩阵反超主线（0.82×）
 - HF32 模式比任何 fp32 路径快 3~7×（torch 亦支持 `torch.npu.matmul.allow_hf32=True`，模式对齐后主线仍略优）
-- JIT 便捷入口每次调用含 ~100ms 框架重 trace 开销；低延迟场景请用 `run.compile()` AOT 路径（~156us/调用，同步语义）
+- JIT 便捷入口每次调用含 ~100ms 框架重 trace 开销；低延迟场景请用 `cannbotdsl.compile(op.run, *specs)` AOT 路径（`TensorSpec` 描述入参，返回可重复调用的编译产物）
