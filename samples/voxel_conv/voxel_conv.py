@@ -18,26 +18,24 @@ Multi-core: all (batch, group, M_tile, N_tile) work items are linearized
 into a flat index and round-robin distributed across AIC cores. Each core
 independently completes the full Cin reduction for its assigned tiles.
 """
+from cannbotdsl.lang.host import host
 
 import torch
-from torch import as_tensor as from_torch_npu
 
 from cannbotdsl import dtypes
-from cannbotdsl.arch import get_block_idx, get_block_num
+from cannbotdsl.ops.arch import get_block_idx, get_block_num
 from cannbotdsl.channel import Channel
-from cannbotdsl.conv import (
+from cannbotdsl.ops.conv import (
     conv2d_load_filter,
     conv2d_load_fmap,
     conv2d_load_im2col,
     conv2d_store_output,
     make_conv2d_spec,
 )
-from cannbotdsl.integer import Int64
-from cannbotdsl.jit_runner import jit
-from cannbotdsl.kernel_launcher import kernel
-from cannbotdsl.math import matmul
-from cannbotdsl.tensor import mem_copy
-from cannbotdsl.typing.types import MemLoc, Tensor
+from cannbotdsl.lang.kernel import kernel
+from cannbotdsl.ops.matmul import matmul
+from cannbotdsl import MemLoc, Tensor
+from cannbotdsl.ops.memcpy import mem_copy
 
 __all__ = ["voxel_conv"]
 
@@ -148,7 +146,8 @@ class VoxelConvKernel:
             m_idx = rem2 // n_tiles
             n_idx = rem2 % n_tiles
 
-            for ci_idx in range(Int64(ci_tiles)):
+            l0c_slot = l0c.produce()
+            for ci_idx in range(ci_tiles):
                 tile = self.spec.tile(
                     tile=self.tile_shape,
                     coord=(m_idx, n_idx, ci_idx),
@@ -156,16 +155,26 @@ class VoxelConvKernel:
                     group=group,
                 )
 
-                conv2d_load_fmap(fmap_l1, gm_x, tile)
-                conv2d_load_filter(filter_l1, gm_filter, tile)
+                fmap_slot = fmap_l1.produce()
+                conv2d_load_fmap(fmap_slot, gm_x, tile)
 
-                conv2d_load_im2col(tile.l0a_view(l0a), fmap_l1, tile)
-                mem_copy(tile.l0b_view(l0b), tile.l1b_view(filter_l1))
+                filter_slot = filter_l1.produce()
+                conv2d_load_filter(filter_slot, gm_filter, tile)
 
+                fmap_ready = fmap_l1.consume()
+                l0a_slot = l0a.produce()
+                conv2d_load_im2col(tile.l0a_view(l0a_slot), fmap_ready, tile)
+
+                filter_ready = filter_l1.consume()
+                l0b_slot = l0b.produce()
+                mem_copy(tile.l0b_view(l0b_slot), tile.l1b_view(filter_ready))
+
+                l0a_ready = l0a.consume()
+                l0b_ready = l0b.consume()
                 matmul(
-                    tile.l0c_view(l0c),
-                    tile.l0a_view(l0a),
-                    tile.l0b_view(l0b),
+                    tile.l0c_view(l0c_slot),
+                    tile.l0a_view(l0a_ready),
+                    tile.l0b_view(l0b_ready),
                     init=(ci_idx == 0),
                 )
 
@@ -175,13 +184,14 @@ class VoxelConvKernel:
                 batch=batch,
                 group=group,
             )
+            l0c_ready = l0c.consume()
             conv2d_store_output(
                 gm_y,
-                output_tile.l0c_view(l0c),
+                output_tile.l0c_view(l0c_ready),
                 output_tile,
             )
 
-    @jit
+    @host
     def run(self, gm_x: Tensor, gm_filter: Tensor, gm_y: Tensor):
         self.voxel_conv_kernel[self.block_num](gm_x, gm_filter, gm_y)
 
@@ -201,8 +211,8 @@ def voxel_conv(
 
     The kernel computes standard 2D convolution with NCHW input/output
     and OIHW filter layout. This wrapper delegates geometry to
-    Conv2dSpec, converts torch NPU tensors to cannbotdsl tensors, and
-    synchronously launches the JIT-compiled multi-core kernel.
+    Conv2dSpec and synchronously launches the JIT-compiled multi-core
+    kernel through the registered torch provider integration.
     """
     dtype = dtypes.float16 if x.dtype == torch.float16 else dtypes.bfloat16
     op = VoxelConvKernel(
@@ -221,10 +231,6 @@ def voxel_conv(
         dtype=x.dtype,
         device=x.device,
     )
-    op.run(
-        from_torch_npu(x),
-        from_torch_npu(weight),
-        from_torch_npu(y),
-    )
+    op.run(x, weight, y)
     torch.npu.synchronize()
     return y

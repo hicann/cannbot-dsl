@@ -16,7 +16,7 @@ Coverage:
   * stride/dilation asymmetric + asymmetric padding
   * all-padding M tiles (fully padded input)
   * groups=2
-  * AscendC compile-only (dump + assert fill_l1_sync path)
+  * AscendC compile-only (dump + assert fill_l1 path)
 """
 
 from __future__ import annotations
@@ -27,13 +27,16 @@ import sys
 import pytest
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "samples", "voxel_conv"))
+from cannbotdsl.lang.host import host
+
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "..", "..", "samples", "voxel_conv")
+)
 
 import cannbotdsl
 from cannbotdsl import dtypes
-from cannbotdsl.jit_runner import jit
 from cannbotdsl.tensor import make_layout, make_pointer, make_tensor
-from cannbotdsl.typing.types import MemLoc
+from cannbotdsl.tensor import MemLoc
 
 from voxel_conv import VoxelConvKernel, voxel_conv
 
@@ -62,7 +65,7 @@ def test_voxel_conv_full_pipeline_compiles(tmp_path, monkeypatch):
         padding=(1, 1, 1, 1),
     )
 
-    @jit
+    @host
     def compile_voxel_conv():
         gm_x = _make_gm(dtypes.float16, _INPUT_SHAPE, 0)
         gm_filter = _make_gm(dtypes.float16, _FILTER_SHAPE, 4096)
@@ -74,7 +77,8 @@ def test_voxel_conv_full_pipeline_compiles(tmp_path, monkeypatch):
         ascendc_path = tmp_path / "compile_voxel_conv.asc"
         assert ascendc_path.exists()
         ascendc = ascendc_path.read_text()
-        assert "asc_fill_l1_sync(" in ascendc
+        assert "asc_fill_l1(" in ascendc
+        assert "asc_fill_l1_sync(" not in ascendc
         assert "AscendC::Fill(" not in ascendc
         assert "asc_fill_l0a(" not in ascendc
     finally:
