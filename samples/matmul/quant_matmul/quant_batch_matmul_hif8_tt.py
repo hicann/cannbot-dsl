@@ -42,7 +42,7 @@ from cannbotdsl import dtypes, get_mem_size, get_platform_info
 from cannbotdsl.ops.arch import get_block_idx, get_block_num
 from cannbotdsl.channel import Channel
 from cannbotdsl.lang.constexpr import const_expr
-from cannbotdsl.lang.jit import jit
+from cannbotdsl.lang.host import host
 from cannbotdsl.lang.kernel import kernel
 from cannbotdsl.ops.matmul import matmul
 from cannbotdsl import MemLoc, Tensor
@@ -603,9 +603,9 @@ class QbmmTtKernel:
         )
         l1_b = Channel(
             MemLoc.L1,
-            (tiling.k_l1, tiling.base_n)
+            (tiling.base_n, tiling.k_l1)
             if tiling.transpose_b
-            else (tiling.base_n, tiling.k_l1),
+            else (tiling.k_l1, tiling.base_n),
             tiling.b_dtype,
             depth=tiling.l1_buffer_num,
             data_format="nz" if tiling.transpose_b else "zn",
@@ -743,7 +743,7 @@ class QbmmTtKernel:
                 unit_flag=3,
             )
 
-    @jit
+    @host
     def run(
         self,
         gm_a: Tensor,

@@ -32,7 +32,7 @@ Key properties:
     cat/stack/contiguous); the kernel reads per-group elements and shapes
     dynamically, so M/N/K may differ across groups.
   - Padding free: inputs are never padded on the host; groups are sliced at
-    their real extents, tail tiles are clipped by tile_view, and the ND2NZ
+    their real extents, tail tiles are clipped by tile_slice, and the ND2NZ
     copy engine zero-pads tails.
 """
 
@@ -46,12 +46,13 @@ from cannbotdsl import dtypes, MemLoc, get_mem_size, get_platform_info
 from cannbotdsl.ops.arch import get_block_idx, get_block_num
 from cannbotdsl.channel import Channel
 from cannbotdsl.lang.constexpr import const_expr
+from cannbotdsl.lang.host import host
 from cannbotdsl.lang.jit import jit
 from cannbotdsl.lang.kernel import kernel
 from cannbotdsl.ops.matmul import matmul
 from cannbotdsl.ops.memcpy import make_copy_engine, mem_copy
 from cannbotdsl.tensor import (
-    tile_view,
+    tile_slice,
     permute,
     ceil_div,
 )
@@ -465,11 +466,7 @@ class BlockMmad:
             tiling.a_dtype,
             depth=tiling.l1_buffer_num,
         )
-        self.copy_a = make_copy_engine(
-            format_transform="nd2nz",
-            dtype=tiling.a_dtype,
-            pad_value=0.0,
-        )
+        self.copy_a = make_copy_engine(format_transform="nd2nz")
 
         self.l1_b = Channel(
             MemLoc.L1,
@@ -479,11 +476,7 @@ class BlockMmad:
             tiling.b_dtype,
             depth=tiling.l1_buffer_num,
         )
-        self.copy_b = make_copy_engine(
-            format_transform="nd2nz",
-            dtype=tiling.b_dtype,
-            pad_value=0.0,
-        )
+        self.copy_b = make_copy_engine(format_transform="nd2nz")
 
         self.l0a = Channel(
             MemLoc.L0A,
@@ -520,7 +513,7 @@ class BlockMmad:
         """K reduction (GM→L1→L0→MMAD) + FIXPIPE for one output tile.
 
         a_src/b_src are this group's row-major aliases; c_src is the group's
-        output slice (tail tiles are clipped by tile_view).  disable_l2 is a
+        output slice (tail tiles are clipped by tile_slice).  disable_l2 is a
         runtime per-group flag: groups with M below base_m skip caching
         weight lines in L2; l2_cache_ctl is a compile-time attribute, so the
         runtime choice is a branch between two copy sites.
@@ -531,47 +524,58 @@ class BlockMmad:
         base_k = t.base_k
         k_l1 = t.k_l1
 
+        l0c_tensor = self.l0c.produce()
         for k_l1_idx in range(k_l1_tiles):
             if const_expr(t.trans_a):
-                gm_a_tile = tile_view(a_src, (k_l1, base_m), (k_l1_idx, m_tile_idx))
+                gm_a_tile = tile_slice(a_src, (k_l1, base_m), (k_l1_idx, m_tile_idx))
             else:
-                gm_a_tile = tile_view(a_src, (base_m, k_l1), (m_tile_idx, k_l1_idx))
-            mem_copy(self.l1_a, gm_a_tile, engine=self.copy_a)
+                gm_a_tile = tile_slice(a_src, (base_m, k_l1), (m_tile_idx, k_l1_idx))
+            mem_copy(self.l1_a.produce(), gm_a_tile, engine=self.copy_a)
+            l1_a_tensor = self.l1_a.consume()
 
             if const_expr(t.trans_b):
-                gm_b_tile = tile_view(b_src, (base_n, k_l1), (n_tile_idx, k_l1_idx))
+                gm_b_tile = tile_slice(b_src, (base_n, k_l1), (n_tile_idx, k_l1_idx))
             else:
-                gm_b_tile = tile_view(b_src, (k_l1, base_n), (k_l1_idx, n_tile_idx))
+                gm_b_tile = tile_slice(b_src, (k_l1, base_n), (k_l1_idx, n_tile_idx))
 
             # The two mem_copy sites must stay identical except
             # l2_cache_ctl (a compile-time attribute).
+            b_slot = self.l1_b.produce()
             if disable_l2:
-                mem_copy(self.l1_b, gm_b_tile, engine=self.copy_b, l2_cache_ctl=0)
+                mem_copy(b_slot, gm_b_tile, engine=self.copy_b, l2_cache_ctl=0)
             else:
-                mem_copy(self.l1_b, gm_b_tile, engine=self.copy_b, l2_cache_ctl=1)
+                mem_copy(b_slot, gm_b_tile, engine=self.copy_b, l2_cache_ctl=1)
+            l1_b_tensor = self.l1_b.consume()
 
             k_remaining = k_total - k_l1_idx * k_l1
             k_l0_per_l1 = _ceil_div(min(k_l1, k_remaining), base_k)
             for k_l0_idx in range(k_l0_per_l1):
                 if const_expr(t.trans_a):
-                    l1_a_slice = tile_view(self.l1_a, (base_k, base_m), (k_l0_idx, 0))
-                    mem_copy(self.l0a, l1_a_slice, transpose=True)
+                    l1_a_slice = tile_slice(
+                        l1_a_tensor, (base_k, base_m), (k_l0_idx, 0)
+                    )
                 else:
-                    l1_a_slice = tile_view(self.l1_a, (base_m, base_k), (0, k_l0_idx))
-                    mem_copy(self.l0a, l1_a_slice, transpose=False)
+                    l1_a_slice = tile_slice(
+                        l1_a_tensor, (base_m, base_k), (0, k_l0_idx)
+                    )
+                mem_copy(self.l0a.produce(), l1_a_slice, transpose=t.trans_a)
+                l0a_tensor = self.l0a.consume()
 
                 if const_expr(t.trans_b):
-                    l1_b_slice = tile_view(self.l1_b, (base_n, base_k), (0, k_l0_idx))
-                    mem_copy(self.l0b, l1_b_slice, transpose=False)
+                    l1_b_slice = tile_slice(
+                        l1_b_tensor, (base_n, base_k), (0, k_l0_idx)
+                    )
                 else:
-                    l1_b_slice = tile_view(self.l1_b, (base_k, base_n), (k_l0_idx, 0))
-                    mem_copy(self.l0b, l1_b_slice, transpose=True)
+                    l1_b_slice = tile_slice(
+                        l1_b_tensor, (base_k, base_n), (k_l0_idx, 0)
+                    )
+                mem_copy(self.l0b.produce(), l1_b_slice, transpose=not t.trans_b)
+                l0b_tensor = self.l0b.consume()
 
                 is_first_k_block = k_l1_idx == 0 and k_l0_idx == 0
-                matmul(self.l0c, self.l0a, self.l0b, init=is_first_k_block)
-
-        gm_c_tile = tile_view(c_src, (base_m, base_n), (m_tile_idx, n_tile_idx))
-        mem_copy(gm_c_tile, self.l0c)
+                matmul(l0c_tensor, l0a_tensor, l0b_tensor, init=is_first_k_block)
+        gm_c_tile = tile_slice(c_src, (base_m, base_n), (m_tile_idx, n_tile_idx))
+        mem_copy(gm_c_tile, l0c_tensor)
 
 
 # ============================================================================
@@ -818,7 +822,7 @@ class GmmKernel:
             count = cur_count % block_num
         return count, new_pre_offset
 
-    @jit
+    @host
     def run(
         self,
         a_list: cannbotdsl.TensorList,

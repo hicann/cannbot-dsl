@@ -319,6 +319,13 @@ def assert_isclose(actual: np.ndarray, golden: np.ndarray, case_id: str) -> None
 # ---------------------------------------------------------------------------
 
 
+def _copy_input_to_npu(tensor: torch.Tensor) -> torch.Tensor:
+    """Copy the contiguous base, then restore a last-two-axis transpose."""
+    if tensor.is_contiguous():
+        return tensor.npu()
+    return tensor.transpose(-1, -2).contiguous().npu().transpose(-1, -2)
+
+
 @pytest.mark.npu
 @pytest.mark.parametrize(
     "scenario,m_list,k,n,tw,dtype,group_type,split_item,group_list_type,gl_none",
@@ -334,8 +341,8 @@ def test_group_matmul_precision(
     )
     golden = group_matmul_golden(scenario, x_list, w_list, group_list, group_list_type)
 
-    x_npu = [t.npu() for t in x_list]
-    w_npu = [t.npu() for t in w_list]
+    x_npu = [_copy_input_to_npu(t) for t in x_list]
+    w_npu = [_copy_input_to_npu(t) for t in w_list]
     gl_npu = group_list.npu() if group_list is not None else None
 
     y_npu = group_matmul(

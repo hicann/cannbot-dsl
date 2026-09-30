@@ -23,12 +23,14 @@ __all__ = ["npu_quant_matmul"]
 import functools
 from typing import NamedTuple
 
+import cannbotdsl
 import torch
 
 from cannbotdsl import dtypes, TensorSpec, get_mem_size, get_platform_info
 from cannbotdsl.ops.arch import get_block_idx
 from cannbotdsl.channel import Channel
 from cannbotdsl.lang.constexpr import const_expr
+from cannbotdsl.lang.host import host
 from cannbotdsl.lang.jit import jit
 from cannbotdsl.lang.kernel import kernel
 from cannbotdsl.ops.matmul import matmul
@@ -1810,7 +1812,7 @@ class QbmmMxKernel:
                     sub_n_idx,
                 )
 
-    @jit
+    @host
     def run(
         self,
         out_gm: Tensor,
@@ -1982,7 +1984,7 @@ def _build_mx_aot_callable(
         TensorSpec(shape=scale_b_shape, dtype=dtypes.float8_e8m0),
         TensorSpec(shape=(n if has_bias else 0,), dtype=dtypes.float32),
     )
-    return kernel_obj.run.compile(*specs)
+    return cannbotdsl.compile(kernel_obj.run, *specs)
 
 
 def _validate_mx_quant_matmul_input(a, b, scale_a, scale_b, bias, output_dtype):
