@@ -80,7 +80,7 @@ bash ./Ascend-cann-950-ops_9.2.0-beta.2_linux-x86_64.run --install --force --ins
 source ${install_path}/ascend-toolkit/set_env.sh
 ```
 
-NPU 驱动与固件不在该镜像中，需从 [CANN 安装部署](https://www.hiascend.com/cann/download)页面获取并预先安装；机器上已有配套驱动与固件的可跳过此步。
+复现 DeepSeek V4.1 相关算子建议使用 CANN `9.2.0~weekly.20260909.01`，包目录见 [cann-run-mirror/software/legacy/20260909000323409](https://ascend.devcloud.huaweicloud.com/artifactory/cann-run-mirror/software/legacy/20260909000323409)。
 
 ### 2. 安装 CANNBot-DSL
 
