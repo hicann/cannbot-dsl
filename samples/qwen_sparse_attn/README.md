@@ -62,11 +62,11 @@ out, lse = qwen_sparse_attn(
 
 ## 精度与性能
 
-在 yuhan 的 `wjf` 环境中，19 个 BF16 NPU 精度 case 全部通过；非零 Q/K/V 的 FP16、FP8→FP16 与 FP8→BF16 精度检查通过。测试覆盖稀疏块乱序、重复、物理页重排、自定义 scale、Q 长于 KV 及 13 种 GQA group。在 Ascend NPU 机器上先进入本仓库根目录，然后运行这 19 个 BF16 精度 case：
+19 个 BF16 NPU 精度 case 全部通过；非零 Q/K/V 的 FP16、FP8→FP16 与 FP8→BF16 精度检查通过。测试覆盖稀疏块乱序、重复、物理页重排、自定义 scale、Q 长于 KV 及 13 种 GQA group。在 Ascend NPU 机器上先进入本仓库根目录，然后运行这 19 个 BF16 精度 case：
 
 ```bash
-source /home/w00947517/Ascend/cann-9.2.0/set_env.sh
-/home/w00947517/.conda/envs/wjf/bin/python -m pytest -q test/qwen_sparse_attn/test_qwen_sparse_attn.py
+source /path to cann/cann-9.2.0/set_env.sh
+python -m pytest -q test/qwen_sparse_attn/test_qwen_sparse_attn.py
 ```
 
 上述 `pytest` 命令只运行仓库内的 BF16 精度 case，不会重新测量性能 case。
