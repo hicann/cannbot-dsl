@@ -12,6 +12,7 @@ operators:
   - voxel_conv
   - flash_attn
   - flash_mla_with_kvcache
+  - attn_prologue
   - flash_kda
   - matmul
   - matmul/batch_matmul

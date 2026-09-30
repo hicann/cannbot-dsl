@@ -53,6 +53,14 @@ flash_attn:
   options:
     - flash_attn
 
+attn_prologue:
+  module: True
+  src:
+    - samples/attn_prologue
+    - test/attn_prologue
+  options:
+    - attn_prologue
+
 flash_kda:
   module: True
   src:

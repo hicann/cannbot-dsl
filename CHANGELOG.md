@@ -2,6 +2,10 @@
 
 ## 🔥 更新日志
 
+### 【2026-09-29】
+#### 新特性 New Features
+- 【attn_prologue】迁入基于 CANNBotDSL 的 MXFP8 attention prologue 融合算子，包含 QA/KV 投影、RMSNorm、QR 动态量化、QB 投影、尾部 RoPE 和 KV cache 原地更新；同步迁入独立 CPU golden、FP64 精度复核与完整用例 runner，新增 4 个 decode/prefill NPU 冒烟用例及 6 个 CPU 精度判据用例并接入 CI 算子清单。
+
 ### 【2026-09-23】
 #### 新特性 New Features
 - 【batch_matmul】新增非量化批量矩阵乘算子 `batch_matmul()`：$C[c\_batch, M, N] = A[a\_batch, M, K] @ B[b\_batch, N, K]^T + bias$，batch 维按 numpy/torch.matmul 语义右对齐广播（size-1 维重复、多维同时广播、混合秩），支持 rank 2~6（双 2-D 输入自动升维并压回 2-D）；fp16/bf16/fp32（核内 fp32 累加），fp32 可选 HF32 快速模式（TF32 档）。转置由 stride 自动推导：canonical `transpose(-1,-2)` 视图（K-major 存储）零拷贝翻转到对应 kernel 路径，其余非连续布局拒绝；bias 经 BT 折入 init MMAD，支持 `[N]` 共享与 `[*c_batch, N]` 逐 batch。面向 NPU ARCH 3510（Ascend 950PR / Ascend 950DT），host tiling 对齐主线 `batch_mat_mul_v3`（ResetBaseDav3510 + CalL1TilingDefault + GetBaseK），性能对比 `torch.bmm/baddbmm`（msprof Task Duration）。测试覆盖 fp16/bf16/fp32/HF32、bias（shared/per-batch）、K-major 转置视图、多维 batch 广播（rank 2~6）、非对齐尾块、2-D 输入与不可广播拒绝共 18 个 NPU 用例。

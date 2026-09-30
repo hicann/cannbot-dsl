@@ -9,6 +9,7 @@
 | 矩阵计算 | [grouped_matmul](https://gitcode.com/cann/cannbot-dsl/tree/master/samples/grouped_matmul) | 非量化分组矩阵乘 |
 | 归一化 | [RMSNorm](https://gitcode.com/cann/cannbot-dsl/tree/master/samples/rms_norm) | 均方根归一化 |
 | 注意力 | [Flash Attention](https://gitcode.com/cann/cannbot-dsl/tree/master/samples/flash_attn) | 注意力计算样例 |
+| 注意力 | [attn_prologue](https://gitcode.com/cann/cannbot-dsl/tree/master/samples/attn_prologue) | MXFP8 attention prologue 融合算子 |
 | 注意力 | [Flash KDA](https://gitcode.com/cann/cannbot-dsl/tree/master/samples/flash_kda) | Kimi Delta Attention 样例 |
 | KV Cache | [kv_compress_epilog](https://gitcode.com/cann/cannbot-dsl/tree/master/samples/kv_compress_epilog) | KV Cache 压缩、量化与按槽位更新 |
 | 点云 | [PointNet SA](https://gitcode.com/cann/cannbot-dsl/tree/master/samples/pointnet_sa) | PointNet Set Abstraction |
