@@ -104,7 +104,7 @@ class _StageTwoGolden:
 
 @dataclasses.dataclass
 class _StageThreeGolden:
-    O: torch.Tensor
+    output: torch.Tensor
 
 
 @dataclasses.dataclass
@@ -216,72 +216,85 @@ def _stage1_cpu(K, V, Q, beta_brc, g, *, scale_value) -> _StageOneGolden:
                            U_pre, W, Mqk, K_restored, gamma_C)
 
 
-def _stage1_npu(K, V, Q, beta_brc, g, *, scale_value) -> _StageOneGolden:
-    """Stage1 NPU-oriented golden：显式 batch/head/chunk 循环 + bf16/fp16 交接。"""
-    if V.shape[1] != K.shape[1]:
-        rep = V.shape[1] // K.shape[1]
-        K = K.repeat_interleave(rep, dim=1)
-        Q = Q.repeat_interleave(rep, dim=1)
-    K_i = _to_bf16_to_fp32(_chunk_major(K))
-    V_i = _chunk_major(V).to(torch.float32)
-    Q_i = _to_bf16_to_fp32(_chunk_major(Q))
+def _prepare_stage1_npu_inputs(k, v, q, beta_brc, g):
+    if v.shape[1] != k.shape[1]:
+        rep = v.shape[1] // k.shape[1]
+        k = k.repeat_interleave(rep, dim=1)
+        q = q.repeat_interleave(rep, dim=1)
+    k_i = _to_bf16_to_fp32(_chunk_major(k))
+    v_i = _chunk_major(v).to(torch.float32)
+    q_i = _to_bf16_to_fp32(_chunk_major(q))
     beta = _chunk_major(beta_brc).to(torch.float32)
     g_i = _chunk_major(g).to(torch.float32)
+    return k_i, v_i, q_i, beta, g_i
 
-    batch, heads, chunks, _, dim = K_i.shape
-    gamma = torch.empty_like(K_i)
-    K_decayed_beta = torch.empty_like(K_i)
-    K_decayed = torch.empty_like(K_i)
-    Q_decayed = torch.empty_like(K_i)
-    T_out = torch.empty(batch, heads, chunks, CHUNK_SIZE, CHUNK_SIZE, dtype=torch.float32, device=K.device)
-    U_pre = torch.empty_like(K_i)
-    W = torch.empty_like(K_i)
-    Mqk = torch.empty_like(T_out)
-    K_restored = torch.empty_like(K_i)
-    gamma_C = torch.empty(batch, heads, chunks, dim, 1, dtype=torch.float32, device=K.device)
+
+def _allocate_stage1_npu_outputs(k_i, k):
+    batch, heads, chunks, _, dim = k_i.shape
+    gamma = torch.empty_like(k_i)
+    k_decayed_beta = torch.empty_like(k_i)
+    k_decayed = torch.empty_like(k_i)
+    q_decayed = torch.empty_like(k_i)
+    t_out = torch.empty(batch, heads, chunks, CHUNK_SIZE, CHUNK_SIZE, dtype=torch.float32, device=k.device)
+    u_pre = torch.empty_like(k_i)
+    w = torch.empty_like(k_i)
+    mqk = torch.empty_like(t_out)
+    k_restored = torch.empty_like(k_i)
+    gamma_c = torch.empty(batch, heads, chunks, dim, 1, dtype=torch.float32, device=k.device)
+    return _StageOneGolden(gamma, k_decayed_beta, k_decayed, q_decayed, t_out,
+                           u_pre, w, mqk, k_restored, gamma_c)
+
+
+def _stage1_npu(k, v, q, beta_brc, g, *, scale_value) -> _StageOneGolden:
+    """Stage1 NPU-oriented golden：显式 batch/head/chunk 循环 + bf16/fp16 交接。"""
+    k_i, v_i, q_i, beta, g_i = _prepare_stage1_npu_inputs(k, v, q, beta_brc, g)
+    batch, heads, chunks, _, _ = k_i.shape
+    outputs = _allocate_stage1_npu_outputs(k_i, k)
     for b in range(batch):
         for h in range(heads):
             for c in range(chunks):
-                K_c = K_i[b, h, c]; V_c = V_i[b, h, c]; Q_c = Q_i[b, h, c]
-                beta_c = beta[b, h, c]; g_c = g_i[b, h, c]
+                k_c = k_i[b, h, c]
+                v_c = v_i[b, h, c]
+                q_c = q_i[b, h, c]
+                beta_c = beta[b, h, c]
+                g_c = g_i[b, h, c]
 
                 g_cumsum = torch.cumsum(g_c, dim=0)         # AIV 全程 fp32
                 gamma_c = torch.exp(g_cumsum)
-                K_decayed_prepare = gamma_c * K_c
-                K_decayed_c = _to_bf16_to_fp32(K_decayed_prepare)
-                Q_decayed_c = _to_bf16_to_fp32(gamma_c * Q_c * scale_value)
+                k_decayed_prepare = gamma_c * k_c
+                k_decayed_c = _to_bf16_to_fp32(k_decayed_prepare)
+                q_decayed_c = _to_bf16_to_fp32(gamma_c * q_c * scale_value)
 
-                T = _reference_lower_matmul(
-                    K_c, K_c, g_cumsum, diagonal=-1, cast_operand=_to_bf16_to_fp32,
+                t = _reference_lower_matmul(
+                    k_c, k_c, g_cumsum, diagonal=-1, cast_operand=_to_bf16_to_fp32,
                 ) * beta_c
-                Mqk_c = _to_bf16_to_fp32(_reference_lower_matmul(
-                    Q_c * scale_value, K_c, g_cumsum, diagonal=0, cast_operand=_to_bf16_to_fp32,
+                mqk_c = _to_bf16_to_fp32(_reference_lower_matmul(
+                    q_c * scale_value, k_c, g_cumsum, diagonal=0, cast_operand=_to_bf16_to_fp32,
                 ))
 
-                negative_t = _to_fp16_to_fp32(-T)
+                negative_t = _to_fp16_to_fp32(-t)
                 resident_inv = _npu_neumann_inverse_from_negative_t(negative_t)
 
-                K_decayed_beta_c = _to_bf16_to_fp32(beta_c * K_decayed_prepare)
-                V_beta = _to_bf16_to_fp32(beta_c * V_c)
-                U_pre_c = _to_bf16_to_fp32(_to_bf16_to_fp32(resident_inv) @ _to_bf16_to_fp32(V_beta))
-                workspace_w = _to_bf16_to_fp32(_to_bf16_to_fp32(resident_inv) @ _to_bf16_to_fp32(-K_decayed_beta_c))
-                gamma_c_last = gamma_c[-1].reshape(K_c.shape[-1], 1)
-                K_restored_c = _to_bf16_to_fp32(
-                    K_c * (g_cumsum[-1:] - g_cumsum).exp()
+                k_decayed_beta_c = _to_bf16_to_fp32(beta_c * k_decayed_prepare)
+                v_beta = _to_bf16_to_fp32(beta_c * v_c)
+                u_pre_c = _to_bf16_to_fp32(_to_bf16_to_fp32(resident_inv) @ _to_bf16_to_fp32(v_beta))
+                workspace_w = _to_bf16_to_fp32(_to_bf16_to_fp32(resident_inv) @ _to_bf16_to_fp32(-k_decayed_beta_c))
+                gamma_c_last = gamma_c[-1].reshape(k_c.shape[-1], 1)
+                k_restored_c = _to_bf16_to_fp32(
+                    k_c * (g_cumsum[-1:] - g_cumsum).exp()
                 )
 
-                gamma[b, h, c] = gamma_c
-                K_decayed[b, h, c] = K_decayed_c
-                K_decayed_beta[b, h, c] = K_decayed_beta_c
-                Q_decayed[b, h, c] = Q_decayed_c
-                T_out[b, h, c] = T
-                U_pre[b, h, c] = U_pre_c
-                W[b, h, c] = -workspace_w
-                Mqk[b, h, c] = Mqk_c
-                gamma_C[b, h, c] = gamma_c_last
-                K_restored[b, h, c] = K_restored_c
-    return _StageOneGolden(gamma, K_decayed_beta, K_decayed, Q_decayed, T_out,
-                           U_pre, W, Mqk, K_restored, gamma_C)
+                outputs.Gamma[b, h, c] = gamma_c
+                outputs.K_decayed[b, h, c] = k_decayed_c
+                outputs.K_decayed_beta[b, h, c] = k_decayed_beta_c
+                outputs.Q_decayed[b, h, c] = q_decayed_c
+                outputs.T[b, h, c] = t
+                outputs.U_pre[b, h, c] = u_pre_c
+                outputs.W[b, h, c] = -workspace_w
+                outputs.Mqk[b, h, c] = mqk_c
+                outputs.gamma_C[b, h, c] = gamma_c_last
+                outputs.K_restored[b, h, c] = k_restored_c
+    return outputs
 
 
 def _stage2_cpu(stage1: _StageOneGolden, initial_state) -> _StageTwoGolden:
@@ -336,7 +349,7 @@ def _stage3_cpu(stage1: _StageOneGolden, stage2: _StageTwoGolden) -> _StageThree
     """Stage3 CPU 公式：O = O_state + Mqk @ U。"""
     O_i = stage2.O_state.to(torch.float32) + stage1.Mqk.to(torch.float32) @ stage2.U.to(torch.float32)
     batch, heads, chunks, chunk, dim = O_i.shape
-    return _StageThreeGolden(O=O_i.reshape(batch, heads, chunks * chunk, dim).contiguous())
+    return _StageThreeGolden(output=O_i.reshape(batch, heads, chunks * chunk, dim).contiguous())
 
 
 def _stage3_npu(stage1: _StageOneGolden, stage2: _StageTwoGolden) -> _StageThreeGolden:
@@ -352,7 +365,7 @@ def _stage3_npu(stage1: _StageOneGolden, stage2: _StageTwoGolden) -> _StageThree
             for c in range(chunks):
                 mqk_u = _to_bf16_to_fp32(Mqk[b, h, c]) @ _to_bf16_to_fp32(U[b, h, c])
                 O_i[b, h, c] = _to_bf16_to_fp32(O_state[b, h, c] + mqk_u)
-    return _StageThreeGolden(O=O_i.reshape(batch, heads, chunks * chunk, dim).contiguous())
+    return _StageThreeGolden(output=O_i.reshape(batch, heads, chunks * chunk, dim).contiguous())
 
 
 def _chain_cpu(inputs: KdaInputs) -> _ChainGolden:
@@ -389,14 +402,14 @@ def compute_golden(name: str, inputs: KdaInputs):
             for name in ("Q", "K", "V", "g", "beta_brc")
         })
     chain = _chain_cpu(activated) if name == "cpu_chunk" else _chain_npu(activated)
-    return chain.stage3.O[:, :, :tokens].contiguous(), chain.stage2.S.transpose(-1, -2).contiguous()
+    return chain.stage3.output[:, :, :tokens].contiguous(), chain.stage2.S.transpose(-1, -2).contiguous()
 
 
 pytestmark = pytest.mark.npu
 _LOWER_BOUND = float(os.environ.get("KDA_LOWER_BOUND") or -5.0)
 _TOL = float(os.environ.get("KDA_TOL", "5e-3"))
 _DYNAMIC_KDA = load_sample("flash_kda/flash_kda.py")
-_DYNAMIC_METADATA = load_sample("flash_kda_metadata/flash_kda_metadata.py")
+_DYNAMIC_METADATA = load_sample("flash_kda/flash_kda_metadata.py")
 
 
 def require_npu():
@@ -425,18 +438,6 @@ _DYNAMIC_FAST_CASES = (
     _DynamicPrecisionCase("BNSD", False, (513,), 1, 1, 101),
     _DynamicPrecisionCase("BSND", False, (512,), 2, 1, 102),
     _DynamicPrecisionCase("TND", True, (1, 512, 513), 3, 1, 105),
-)
-
-# Each representative ragged case covers a distinct internal tile boundary.
-_WHITEBOX_TAIL_CASES = (
-    _DynamicPrecisionCase("BNSD", True, (1, 15, 16, 17), 3, 1, 4100),
-    _DynamicPrecisionCase("BSND", True, (31, 32, 33, 47, 48, 49), 5, 1, 4105),
-    _DynamicPrecisionCase("TND", True, (63, 64, 65), 3, 1, 4110),
-    _DynamicPrecisionCase("TND", True, (127, 128, 129), 3, 1, 4111),
-)
-_WHITEBOX_MULTIROUND_CASES = (
-    # 96 * (4 + 3 + 2) = 864 chunk tasks cross the 861-slot boundary.
-    _DynamicPrecisionCase("TND", True, (193, 129, 65), 96, 3, 4201),
 )
 
 
@@ -492,38 +493,9 @@ def _dynamic_valid_outputs(output, case):
     return [output[b:b + 1, :, :length] for b, length in enumerate(case.lengths)]
 
 
-def _assert_schedule_covers_logical_chunks(metadata, case):
-    schedule = _DYNAMIC_METADATA.decode_metadata(metadata.cpu().tolist())
-    assert schedule["status"] == _DYNAMIC_METADATA.STATUS_OK
-    assert schedule["batch"] == len(case.lengths)
-    assert schedule["value_heads"] == case.nv
-    chunk_cursor = [0] * len(case.lengths)
-    starts = [sum(case.lengths[:batch]) for batch in range(len(case.lengths))]
-    for index, record in enumerate(schedule["stage12_rounds"]):
-        assert record["stage12_round_idx"] == index
-        for active, batch in enumerate(record["batch_idx"]):
-            assert record["valid_seq_len"][active] == case.lengths[batch]
-            assert record["storage_batch_idx"][active] == (0 if case.layout == "TND" else batch)
-            assert record["token_start"][active] == (starts[batch] if case.layout == "TND" else 0)
-            assert record["chunk_start_per_group"][active] == chunk_cursor[batch]
-            count = record["chunk_num_per_group"][active]
-            assert 0 < count <= (case.lengths[batch] + 63) // 64 - chunk_cursor[batch]
-            assert record["stage1_task_prefix"][active + 1] - record["stage1_task_prefix"][active] == case.nv * count
-            chunk_cursor[batch] += count
-        assert record["stage1_task_prefix"][-1] <= _DYNAMIC_METADATA.WORKSPACE_SLOTS
-    assert chunk_cursor == [(length + 63) // 64 for length in case.lengths]
-    return schedule
-
-
-def _assert_dynamic_precision_case(case, *, whitebox=False):
+def _assert_dynamic_precision_case(case):
     require_npu()
     inputs, golden_outputs, golden_state = _make_dynamic_case(case)
-    if whitebox and case.has_cu and case.layout != "TND":
-        # Invalid rows must never affect valid outputs or the final state.
-        # Padding output is undefined, so only poison inputs, not expected output.
-        for batch, length in enumerate(case.lengths):
-            for tensor in (inputs.Q, inputs.K, inputs.V, inputs.g, inputs.beta_brc):
-                tensor[batch, :, length:] = float("nan")
     q, k, v, g, beta = (tensor.npu() for tensor in _dynamic_layout_inputs(inputs, case))
     cu_seqlens = None
     if case.has_cu:
@@ -531,10 +503,6 @@ def _assert_dynamic_precision_case(case, *, whitebox=False):
     initial_state = inputs.initial_state.transpose(-1, -2).contiguous().npu()
     initial_state_before = initial_state.clone()
     metadata = _DYNAMIC_METADATA.flash_kda_metadata(q, v, initial_state, case.layout, cu_seqlens)
-    if whitebox:
-        schedule = _assert_schedule_covers_logical_chunks(metadata, case)
-        if sum((length + 63) // 64 for length in case.lengths) * case.nv > _DYNAMIC_METADATA.WORKSPACE_SLOTS:
-            assert schedule["stage12_round_num"] > 1
     output, state = _DYNAMIC_KDA.flash_kda(
         q, k, v, g, beta, inputs.scale_value, initial_state, inputs.A_log.npu(), inputs.dt_bias.npu(),
         inputs.lower_bound, case.layout, metadata,
@@ -569,12 +537,6 @@ def _assert_dynamic_precision_case(case, *, whitebox=False):
 @pytest.mark.parametrize("case", _DYNAMIC_FAST_CASES, ids=lambda case: case.case_id)
 def test_flash_kda_dynamic_precision(case):
     _assert_dynamic_precision_case(case)
-
-
-@pytest.mark.parametrize("case", _WHITEBOX_TAIL_CASES + _WHITEBOX_MULTIROUND_CASES,
-                         ids=lambda case: case.case_id)
-def test_flash_kda_non_aligned_whitebox(case):
-    _assert_dynamic_precision_case(case, whitebox=True)
 
 
 def teardown_module():

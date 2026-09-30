@@ -31,8 +31,6 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 | indexer_prologue_qw | MXFP8 Q GEMM、尾部 RoPE、MXFP4 量化，以及 BF16 W GEMM | [samples/indexer_prologue_qw](samples/indexer_prologue_qw) |
 | attn_prologue | MXFP8 QA/KV 投影、RMSNorm、QR 量化、QB 投影、RoPE 与 KV cache 更新 | [samples/attn_prologue](samples/attn_prologue) |
 | flash_kda | Kimi Delta Attention prefill 融合算子 | [samples/flash_kda](samples/flash_kda) |
-| flash_kda_metadata | FlashKDA 调度 metadata 生成（AICPU） | [samples/flash_kda_metadata](samples/flash_kda_metadata) |
-| fused_recurrent_kda_snapshot | Kimi Delta Attention decode（1～8 token，状态快照） | [samples/fused_recurrent_kda_snapshot](samples/fused_recurrent_kda_snapshot) |
 | matmul | $C[M,N] = A[M,K] @ B[N,K]^T$ | [samples/matmul/matmul](samples/matmul/matmul) |
 | matmul_streamk | $C[M,N] = A[M,K] @ B[K,N]$，DP + SK 混合调度 | [samples/matmul/matmul](samples/matmul/matmul) |
 | batch_matmul | $C[c\_batch, M, N] = A[a\_batch, M, K] @ B[b\_batch, N, K]^T$ | [samples/matmul/batch_matmul](samples/matmul/batch_matmul) |
@@ -57,9 +55,7 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 │   ├── qsa_indexer/    # QSA Indexer 与 metadata
 │   ├── indexer_prologue_qw/ # Indexer prologue：Q 量化与 W GEMM
 │   ├── attn_prologue/  # MXFP8 attention prologue
-│   ├── flash_kda/      # Kimi Delta Attention
-│   ├── flash_kda_metadata/ # FlashKDA 调度 metadata（AICPU）
-│   ├── fused_recurrent_kda_snapshot/ # KDA decode 状态快照
+│   ├── flash_kda/      # Kimi Delta Attention，含 AICPU 调度 metadata
 │   ├── matmul/         # 矩阵乘
 │   │   ├── matmul/         # 非量化矩阵乘（基础调度 + Stream-K）
 │   │   ├── batch_matmul/   # 非量化批量矩阵乘（batch 维广播）
@@ -77,8 +73,6 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 │   ├── indexer_prologue_qw/
 │   ├── attn_prologue/
 │   ├── flash_kda/
-│   ├── flash_kda_metadata/
-│   ├── fused_recurrent_kda_snapshot/
 │   ├── matmul/
 │   │   ├── matmul/
 │   │   ├── batch_matmul/

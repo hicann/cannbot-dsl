@@ -8,6 +8,9 @@
 
 """Cost-aware AICPU metadata producer for FlashKDA."""
 
+# The AICPU tracer handles zeros() by name; it is not a Python global.
+# ruff: noqa: F821
+
 import os
 import tempfile
 import threading
@@ -17,6 +20,7 @@ from typing import Optional
 os.environ.setdefault("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
 
 import torch
+from cannbotdsl import get_platform_info
 from cannbotdsl.aicpu import GmIn, GmOut, I32, I64, U32, aicpu_kernel, current_raw_stream
 from cannbotdsl.aicpu.toolchain import compile_aicpu_kernel
 
@@ -25,6 +29,9 @@ MAGIC = 0x4B444132
 ABI_VERSION = 2
 MAX_AIC_CORES = 32
 WORKSPACE_SLOTS = 861
+CHUNK_SIZE = 64
+ROUND_FIXED_WORDS = 133
+ROUND_WORDS_PER_BATCH = 9
 
 HEADER_MAGIC = 0
 HEADER_ABI_VERSION = 1
@@ -115,7 +122,7 @@ def round_record_words(active_batch_num: int) -> int:
     active_batch_num = int(active_batch_num)
     if active_batch_num <= 0:
         raise ValueError("active_batch_num must be positive")
-    return 133 + 9 * active_batch_num
+    return ROUND_FIXED_WORDS + ROUND_WORDS_PER_BATCH * active_batch_num
 
 
 def metadata_capacity_upper_bound(
@@ -132,12 +139,16 @@ def metadata_capacity_upper_bound(
         raise ValueError("batch must be positive")
     if storage_length <= 0:
         raise ValueError("storage_length must be positive")
-    storage_chunk_num = (storage_length + 63) // 64
+    storage_chunk_num = (storage_length + CHUNK_SIZE - 1) // CHUNK_SIZE
     if is_packed:
         chunk_entries = storage_chunk_num + batch - 1
     else:
         chunk_entries = batch * storage_chunk_num
-    return HEADER_WORDS + 1 + 143 * chunk_entries
+    # One directory word and one single-batch record per possible chunk entry.
+    return (
+        HEADER_WORDS + 1
+        + (1 + ROUND_FIXED_WORDS + ROUND_WORDS_PER_BATCH) * chunk_entries
+    )
 
 
 class FlashKDAMetadataArgs:
@@ -331,9 +342,11 @@ def flash_kda_metadata_kernel(a: FlashKDAMetadataArgs):
                 chunk_num_by_batch[local_batch_idx] = 0
                 tail_row_num_by_batch[local_batch_idx] = 0
             else:
-                chunk_num_by_batch[local_batch_idx] = (valid_seq_len + 63) // 64
+                chunk_num_by_batch[local_batch_idx] = (
+                    valid_seq_len + CHUNK_SIZE - 1
+                ) // CHUNK_SIZE
                 tail_row_num_by_batch[local_batch_idx] = (
-                    (valid_seq_len - 1) % 64
+                    (valid_seq_len - 1) % CHUNK_SIZE
                 ) + 1
 
         chunk_start = 0
@@ -369,8 +382,8 @@ def flash_kda_metadata_kernel(a: FlashKDAMetadataArgs):
     record_begin = HEADER_WORDS + stage12_round_num + 1
     used_words = (
         record_begin
-        + 133 * stage12_round_num
-        + 9 * total_active_batch_entries
+        + ROUND_FIXED_WORDS * stage12_round_num
+        + ROUND_WORDS_PER_BATCH * total_active_batch_entries
     )
     if used_words > a.metadata_word_capacity:
         a.metadata[HEADER_STATUS] = STATUS_BAD_METADATA_CAPACITY
@@ -394,9 +407,11 @@ def flash_kda_metadata_kernel(a: FlashKDAMetadataArgs):
                 valid_seq_len = token_end - token_start
             valid_seq_len_by_batch[local_batch_idx] = valid_seq_len
             token_start_by_batch[local_batch_idx] = token_start
-            chunk_num_by_batch[local_batch_idx] = (valid_seq_len + 63) // 64
+            chunk_num_by_batch[local_batch_idx] = (
+                valid_seq_len + CHUNK_SIZE - 1
+            ) // CHUNK_SIZE
             tail_row_num_by_batch[local_batch_idx] = (
-                (valid_seq_len - 1) % 64
+                (valid_seq_len - 1) % CHUNK_SIZE
             ) + 1
 
         chunk_start = 0
@@ -479,7 +494,7 @@ def flash_kda_metadata_kernel(a: FlashKDAMetadataArgs):
             stage1_task_idx = 0
             for active_idx in range(0, active_batch_num):
                 local_batch_idx = active_local_batch_idx[active_idx]
-                for head_idx in range(0, a.value_heads):
+                for _ in range(0, a.value_heads):
                     for local_chunk_idx in range(
                         0, chunk_num_per_group[active_idx]
                     ):
@@ -488,7 +503,7 @@ def flash_kda_metadata_kernel(a: FlashKDAMetadataArgs):
                         if (
                             global_chunk_idx + 1
                             == chunk_num_by_batch[local_batch_idx]
-                            and tail_row_num_by_batch[local_batch_idx] < 64
+                            and tail_row_num_by_batch[local_batch_idx] < CHUNK_SIZE
                         ):
                             stage1_cost = _stage1_task_cost(
                                 tail_row_num_by_batch[local_batch_idx]
@@ -521,7 +536,7 @@ def flash_kda_metadata_kernel(a: FlashKDAMetadataArgs):
                         chunk_num_per_group[active_idx],
                     )
                     batch_task_num = a.value_heads * candidate_dv_splits_num
-                    for local_task_idx in range(0, batch_task_num):
+                    for _ in range(0, batch_task_num):
                         stage2_task_costs[candidate_task_num] = task_cost
                         candidate_task_num += 1
                         candidate_total_cost += task_cost
@@ -642,7 +657,7 @@ def _decode_round(
     if start + 2 > end:
         raise ValueError("metadata round record is truncated")
     cursor = start
-    stage12_round_idx, active_batch_num = words[cursor : cursor + 2]
+    stage12_round_idx, active_batch_num = words[cursor:cursor + 2]
     cursor += 2
     if start + round_record_words(active_batch_num) != end:
         raise ValueError("metadata round record length does not match active batches")
@@ -788,7 +803,7 @@ _AICPU_LOCK = threading.Lock()
 
 
 def _device_block_num(ref: Optional[torch.Tensor] = None) -> int:
-    """Return a grid-barrier-safe launch size for the selected NPU."""
+    """Return a grid-barrier-safe launch size for the current NPU stream."""
     if ref is not None and ref.device.type not in {"npu", "privateuseone"}:
         return MAX_AIC_CORES
     npu = getattr(torch, "npu", None)
@@ -800,9 +815,10 @@ def _device_block_num(ref: Optional[torch.Tensor] = None) -> int:
             device_index = npu.current_device()
         except RuntimeError:
             return MAX_AIC_CORES
-    properties = npu.get_device_properties(device_index)
+    stream = npu.current_stream(device_index)
+    platform_info = get_platform_info(stream=stream)
     try:
-        cube_core_num = int(properties.cube_core_num)
+        cube_core_num = int(platform_info.cube_core_num)
     except (AttributeError, TypeError, ValueError) as exc:
         raise RuntimeError(f"NPU {device_index} does not expose a valid cube_core_num") from exc
     if cube_core_num <= 0:
@@ -819,14 +835,13 @@ def _get_aicpu_kernel():
         return _AICPU_COMPILED
 
 
-def flash_kda_metadata(
+def _validate_metadata_inputs(
     q: torch.Tensor,
     v: torch.Tensor,
     initial_state: torch.Tensor,
     layout_qkv: str,
-    cu_seqlens: Optional[torch.Tensor] = None,
-) -> torch.Tensor:
-    """Build reusable FlashKDA scheduling metadata on the current stream."""
+    cu_seqlens: Optional[torch.Tensor],
+) -> tuple[int, int, int, int, bool]:
     assert layout_qkv in ("TND", "BNSD", "BSND"), f"layout_qkv must be TND, BNSD, or BSND, got {layout_qkv!r}"
     assert initial_state.dim() == 4, "initial_state must be rank-4"
     batch, n_v, state_dv, state_dk = initial_state.shape
@@ -864,9 +879,26 @@ def flash_kda_metadata(
     assert q.dtype == v.dtype == LOW_DTYPE, "q/v must be bf16"
     assert initial_state.dtype == HIGH_DTYPE, "initial_state must be fp32"
     assert q.device == v.device == initial_state.device, "all inputs must be on the same device"
-    assert q.is_contiguous() and v.is_contiguous() and initial_state.is_contiguous(), "all public inputs must be contiguous"
+    assert q.is_contiguous() and v.is_contiguous() and initial_state.is_contiguous(), (
+        "all public inputs must be contiguous"
+    )
     if cu_seqlens is not None:
         assert cu_seqlens.device == q.device, "all inputs must be on the same device"
+
+    return batch, n_v, physical_batches, storage_length, is_packed
+
+
+def flash_kda_metadata(
+    q: torch.Tensor,
+    v: torch.Tensor,
+    initial_state: torch.Tensor,
+    layout_qkv: str,
+    cu_seqlens: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Build reusable FlashKDA scheduling metadata on the current stream."""
+    batch, n_v, physical_batches, storage_length, is_packed = _validate_metadata_inputs(
+        q, v, initial_state, layout_qkv, cu_seqlens
+    )
 
     core_num = _device_block_num(q)
     metadata_capacity = metadata_capacity_upper_bound(batch, storage_length, is_packed=is_packed)
@@ -874,7 +906,20 @@ def flash_kda_metadata(
     aicpu = _get_aicpu_kernel()
     device_id = q.get_device() if hasattr(q, "get_device") and q.device.type != "cpu" else 0
     stream = current_raw_stream(device_id)
-    aicpu.launch(stream, cu_seqlens=0 if cu_seqlens is None else cu_seqlens.data_ptr(), metadata=metadata.data_ptr(), metadata_word_capacity=metadata.numel(), batch=batch, physical_batches=physical_batches, storage_length=storage_length, value_heads=n_v, has_cu=int(cu_seqlens is not None), is_packed=int(is_packed), core_num=core_num, workspace_slots=WORKSPACE_SLOTS)
+    aicpu.launch(
+        stream,
+        cu_seqlens=0 if cu_seqlens is None else cu_seqlens.data_ptr(),
+        metadata=metadata.data_ptr(),
+        metadata_word_capacity=metadata.numel(),
+        batch=batch,
+        physical_batches=physical_batches,
+        storage_length=storage_length,
+        value_heads=n_v,
+        has_cu=int(cu_seqlens is not None),
+        is_packed=int(is_packed),
+        core_num=core_num,
+        workspace_slots=WORKSPACE_SLOTS,
+    )
     return metadata
 
 
