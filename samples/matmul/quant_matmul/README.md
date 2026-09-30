@@ -205,3 +205,94 @@ pytest test/matmul/quant_matmul/test_quant_batch_matmul_hif8_tt.py -v
 15 次取中位数；图中不包含编译、Launch、同步和输入构造时间。
 
 ![quant_batch_matmul_hif8_tt_perf_compare](../../../figures/quant_batch_matmul_hif8_tt.png)
+
+# QuantBatchMatmul MXA8W4
+
+基于 CANNBot-DSL 实现的混合精度量化矩阵乘算子（MXA8W4）：激活为 MXFP8
+（float8_e4m3fn + E8M0 Scale），权重为 MXFP4（float4_e2m1 + E8M0 Scale），
+输出 float16，面向 Ascend NPU。
+
+## 算子介绍
+
+计算公式：
+
+$$
+C[M,N] = (A[M,K] \cdot sa) @ (B[N,K] \cdot sb)^T + bias
+$$
+
+其中 A/B 沿 K 轴每 32 个数据使用一个 E8M0 Scale（MX group size = 32）。
+公开 Scale 接口将相邻两个 Scale 组成一个 pair，因此 Scale 的分组轴长度为
+`ceil(K / 64)`，最后一维为 2。B 的 fp4 数据以 uint8 打包（每字节 2 个
+e2m1 元素，偶数 K 在低 nibble）。
+
+| 特性与约束 | 说明 |
+| :--- | :--- |
+| 数据类型 | A 为 float8_e4m3fn，B 为打包 float4_e2m1（uint8 载体）；输出 float16 |
+| Scale | ScaleA/ScaleB 为 float8_e8m0fnu 三维 paired-scale Tensor |
+| Shape | M/N 任意；K 为 32 的倍数且无上限（片上 K 状态全部窗化） |
+| 尾块 | M/N/K 尾块由引擎在搬运途中补零；K 尾子块运行期缩窄（`k_extent`），读界不超过 `align64(K)` |
+| 多核并行 | 平衡连续 tile 分配，自适应核数（grid 上限 32） |
+| 架构 | 双核混合：AIV 权重转换 prologue + AIC MX matmul，CrossCore 通道交接 |
+
+算子由 Host 侧 cost-model tiling 推导 baseM/baseN/baseK、L1 K 窗
+（`k_l1 = step_k × base_k`，与 L0/mmad 块解耦）、环深与核数。device 侧
+AIV 将 B 的 fp4 → fp8 做**纯位置换转换**（`[s e e m] → [s 0 0 e e m 0 0]`，
+数值恒为 e2m1 的 2^-6，含次正规精确），经 UB 环形缓冲写入 CrossCore L1
+通道；AIC 完成 A/B 的 MX 矩阵乘与 fixpipe 输出，转换的 2^-6 因子由
+fixpipe `deq_scale=64` 与 host 侧 `bias/64` 补偿。数据流为
+GM → L1（MTE2，nd2nz）→ L0A/L0B（MTE1，MX scale 联动加载）→ MMAD（MX）
+→ L0C → GM（FIXPIPE）。实现详见 `quant_batch_matmul_mxa8w4.py`。
+
+## 快速开始
+
+```python
+import torch
+import torch_npu
+
+from quant_batch_matmul_mxa8w4 import matmul_mix_quant
+
+M, K, N = 256, 352, 256
+
+a = torch.randn(M, K).to(torch.float8_e4m3fn).npu()          # (M, K)
+codes = torch.randint(0, 16, (N, K), dtype=torch.uint8).npu()
+b = (codes[:, 0::2] & 0xF) | ((codes[:, 1::2] & 0xF) << 4)   # (N, K // 2)
+
+# [M, ceil(K / 64), 2] 为 ScaleAND，[N, ceil(K / 64), 2] 为 ScaleBDN。
+scale_a = torch.full((M, (K + 63) // 64, 2), 127, dtype=torch.uint8).npu()
+scale_b = torch.full((N, (K + 63) // 64, 2), 127, dtype=torch.uint8).npu()
+scale_a = scale_a.view(torch.float8_e8m0fnu)
+scale_b = scale_b.view(torch.float8_e8m0fnu)
+
+c = matmul_mix_quant(a, b, scale_a, scale_b)                 # (M, N) float16
+```
+
+`matmul_mix_quant()` 输入/输出说明：
+
+| 参数 | shape | dtype | 说明 |
+| :--- | :---: | :---: | :--- |
+| `a` | (M, K) | float8_e4m3fn | A，左矩阵 |
+| `b` | (N, K // 2) | uint8 | B，右矩阵（fp4 e2m1 打包，偶数 K 低 nibble） |
+| `scale_a` | (M, ceil(K / 64), 2) | float8_e8m0fnu | ScaleA（ScaleAND） |
+| `scale_b` | (N, ceil(K / 64), 2) | float8_e8m0fnu | ScaleB（ScaleBDN） |
+| `bias` | (N,) | torch.float32 | 可选，bias（内部按 2^-6 补偿） |
+| 返回值 `c` | (M, N) | float16 | 矩阵乘结果 |
+
+## 精度测试
+
+测试代码位于 `test/matmul/quant_matmul/test_quant_batch_matmul_mxa8w4.py`，
+11 个用例（5 组代表性形状 × 含 bias + 输入校验，覆盖尾块/部分尾窗/深环/退化形状），pytest 驱动：
+
+```bash
+pytest test/matmul/quant_matmul/test_quant_batch_matmul_mxa8w4.py -v
+```
+
+## 性能数据
+
+与 CANN 内置 `aclnnQuantMatmulV5`（QuantBatchMatmulV4 官方 kernel +
+SWAT tiling solver）在 100 形状（方形/常规/瘦长/尾块 × M 扫描/宽 N/
+奇 M,N/K 尾残差/大 K ≤ 16384/种子随机）上的 msprof task duration
+对比（比值 = aclnn / 本实现，大于 1 表示本实现更快）：几何平均
+**1.170**，76/100 形状领先，无落后超过 9% 的形状；小形状（K ≤ 1024）
+最高 2.28x，尾块形状（K 非 256 倍数）1.07-1.38x。
+
+![quant_batch_matmul_mxa8w4_perf_compare](../../../figures/quant_batch_matmul_mxa8w4.png)

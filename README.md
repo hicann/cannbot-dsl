@@ -34,8 +34,10 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 | flash_kda_metadata | FlashKDA 调度 metadata 生成（AICPU） | [samples/flash_kda_metadata](samples/flash_kda_metadata) |
 | fused_recurrent_kda_snapshot | Kimi Delta Attention decode（1～8 token，状态快照） | [samples/fused_recurrent_kda_snapshot](samples/fused_recurrent_kda_snapshot) |
 | matmul | $C[M,N] = A[M,K] @ B[N,K]^T$ | [samples/matmul/matmul](samples/matmul/matmul) |
+| matmul_streamk | $C[M,N] = A[M,K] @ B[K,N]$，DP + SK 混合调度 | [samples/matmul/matmul](samples/matmul/matmul) |
 | batch_matmul | $C[c\_batch, M, N] = A[a\_batch, M, K] @ B[b\_batch, N, K]^T$ | [samples/matmul/batch_matmul](samples/matmul/batch_matmul) |
 | quant_matmul | $C[M,N] = Dequant(A)[M,K] @ Dequant(B)[N,K]^T$ | [samples/matmul/quant_matmul](samples/matmul/quant_matmul) |
+| quant_batch_matmul_mxa8w4 | $C[M,N] = (A \cdot sa)[M,K] @ (B \cdot sb)[N,K]^T + bias$，MXFP8 激活 × MXFP4 权重 | [samples/matmul/quant_matmul](samples/matmul/quant_matmul) |
 | grouped_matmul | $y_i[m_i,n_i] = x_i[m_i,k_i] \times weight_i[k_i,n_i]$ | [samples/grouped_matmul](samples/grouped_matmul) |
 | pointnet_sa | $\text{feat}[K, D_{out}] = \max_{j} \text{MLP}(\text{points}[K, j, D_{in}])$ | [samples/pointnet_sa](samples/pointnet_sa) |
 | rms_norm | $y = x \cdot rstd \cdot \gamma$ | [samples/rms_norm](samples/rms_norm) |
@@ -59,9 +61,9 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 │   ├── flash_kda_metadata/ # FlashKDA 调度 metadata（AICPU）
 │   ├── fused_recurrent_kda_snapshot/ # KDA decode 状态快照
 │   ├── matmul/         # 矩阵乘
-│   │   ├── matmul/         # 非量化矩阵乘
+│   │   ├── matmul/         # 非量化矩阵乘（基础调度 + Stream-K）
 │   │   ├── batch_matmul/   # 非量化批量矩阵乘（batch 维广播）
-│   │   └── quant_matmul/   # MXFP8/MXFP4 全量化矩阵乘
+│   │   └── quant_matmul/   # 量化矩阵乘（MXFP8/MXFP4、MXA8W4、HiFloat8 TT）
 │   ├── grouped_matmul/ # 非量化分组矩阵乘
 │   ├── pointnet_sa/    # PointNet Set Abstraction
 │   ├── rms_norm/       # RmsNorm 归一化

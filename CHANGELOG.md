@@ -10,6 +10,10 @@
 #### 新特性 New Features
 - 【batch_matmul】新增非量化批量矩阵乘算子 `batch_matmul()`：$C[c\_batch, M, N] = A[a\_batch, M, K] @ B[b\_batch, N, K]^T + bias$，batch 维按 numpy/torch.matmul 语义右对齐广播（size-1 维重复、多维同时广播、混合秩），支持 rank 2~6（双 2-D 输入自动升维并压回 2-D）；fp16/bf16/fp32（核内 fp32 累加），fp32 可选 HF32 快速模式（TF32 档）。转置由 stride 自动推导：canonical `transpose(-1,-2)` 视图（K-major 存储）零拷贝翻转到对应 kernel 路径，其余非连续布局拒绝；bias 经 BT 折入 init MMAD，支持 `[N]` 共享与 `[*c_batch, N]` 逐 batch。面向 NPU ARCH 3510（Ascend 950PR / Ascend 950DT），host tiling 对齐主线 `batch_mat_mul_v3`（ResetBaseDav3510 + CalL1TilingDefault + GetBaseK），性能对比 `torch.bmm/baddbmm`（msprof Task Duration）。测试覆盖 fp16/bf16/fp32/HF32、bias（shared/per-batch）、K-major 转置视图、多维 batch 广播（rank 2~6）、非对齐尾块、2-D 输入与不可广播拒绝共 18 个 NPU 用例。
 
+- 【matmul_streamk】新增 Stream-K（DPSK）矩阵乘算子 `matmul_streamk()`：$C[M,N] = A[M,K] \times B[K,N]$，采用 DP + SK 混合调度——DP tiles 各核独立计算完整 K 维并直写输出 GM，SK tiles 按 K 维 split 写入 workspace，AIV 从 workspace 做 fp32 累加 reduce；纯 DP 路径启用 slide window + 行反转提升 L2 命中率。A/B/C 支持 float16、bfloat16（核内仅支持 transpose_a=False、transpose_b=False），host 侧 tiling 推导 tile/缓冲深度/L2 cache 参数。面向 NPU ARCH 3510（Ascend 950PR / 950DT），5 组代表性 shape × 2 dtype 共 10 个精度用例，性能对比 CANN 包内置 torch_npu matmul（100 个纯 SK 用例）。
+
+- 【quant_batch_matmul_mxa8w4】新增混合精度量化矩阵乘算子 `matmul_mix_quant()`（MXA8W4）：$C[M,N] = (A \cdot sa)[M,K] \times (B \cdot sb)[N,K]^T + bias$，激活为 MXFP8（float8_e4m3fn + E8M0 paired-scale），权重为 MXFP4（uint8 打包 float4_e2m1 + E8M0 paired-scale），输出 float16；AIV 权重 prologue 将 fp4 → fp8 做纯位置换转换（2^-6 因子由 fixpipe `deq_scale=64` 与 host 侧 `bias/64` 补偿），经 CrossCore 通道交接到 AIC MX matmul。K 为 32 的倍数且无上限（片上 K 状态全部窗化），M/N/K 尾块由引擎在搬运途中补零。面向 NPU ARCH 3510（Ascend 950PR / 950DT），11 个精度用例（5 组代表性形状 × 含 bias + 输入校验），性能对比 CANN 内置 `aclnnQuantMatmulV5`。
+
 ### 【2026-09-21】
 #### 文档 Documentation
 - 【API 文档】扩充设备侧接口文档并重组 Kernel API 分类：Host API 新增平台信息（`get_platform_info`、`get_mem_size`）；Kernel API 划分为数据搬运、系统变量访问、同步与缓存控制三类，新增系统变量访问 9 个与同步与缓存控制 4 个接口页，原 `api/operations/` 下的接口页迁至 `api/kernel/`，侧边栏同步更新。

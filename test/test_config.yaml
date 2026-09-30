@@ -69,6 +69,25 @@ flash_kda:
   options:
     - flash_kda
 
+# 文件级路由：matmul/matmul 与 matmul/quant_matmul 目录内混有尚未适配
+# cannbotdsl 0.6.0 接口的存量样例，新增样例按精确文件路径触发各自的
+# 测试文件，避免连带触发同目录存量样例的用例。
+matmul_streamk:
+  module: True
+  src:
+    - samples/matmul/matmul/matmul_streamk.py
+    - test/matmul/matmul/test_matmul_streamk.py
+  options:
+    - matmul/matmul/test_matmul_streamk.py
+
+quant_batch_matmul_mxa8w4:
+  module: True
+  src:
+    - samples/matmul/quant_matmul/quant_batch_matmul_mxa8w4.py
+    - test/matmul/quant_matmul/test_quant_batch_matmul_mxa8w4.py
+  options:
+    - matmul/quant_matmul/test_quant_batch_matmul_mxa8w4.py
+
 matmul:
   module: True
   src:
