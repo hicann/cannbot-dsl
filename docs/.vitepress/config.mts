@@ -1,10 +1,62 @@
 import { defineConfig } from 'vitepress'
 
 const guideSidebar = [
-  { text: '文档概览', link: '/getting-started/' },
+  { text: '开始使用', link: '/getting-started/' },
   { text: '项目介绍', link: '/guide/' },
+  { text: '编程模型', link: '/programming-model/' },
   { text: '仓库结构', link: '/guide/repository' },
   { text: '样例导航', link: '/examples/' }
+]
+
+const programmingModelSidebar = [
+  { text: '编程模型概览', link: '/programming-model/' },
+  {
+    text: '语言机制',
+    collapsed: false,
+    items: [
+      { text: '简介', link: '/programming-model/introduction' },
+      { text: '硬件与执行模型', link: '/programming-model/hardware-model' },
+      { text: '代码生成', link: '/programming-model/code-generation' },
+      { text: '类型系统与宿主语言边界', link: '/programming-model/type-system' },
+      { text: '控制流', link: '/programming-model/control-flow' }
+    ]
+  },
+  {
+    text: '数据与硬件',
+    collapsed: false,
+    items: [
+      { text: '数据、布局与切块', link: '/programming-model/data-and-layout' },
+      { text: '片上存储、流水与 GM 协作', link: '/programming-model/onchip-memory' },
+      { text: '矢量寄存器与 lane 模型', link: '/programming-model/vector-registers' },
+      { text: '三类计算单元', link: '/programming-model/compute' },
+      { text: '数据类型与量化', link: '/programming-model/data-types' },
+      { text: '同步、Cache 与跨核交接', link: '/programming-model/synchronization' }
+    ]
+  },
+  {
+    text: '动手实践',
+    collapsed: false,
+    items: [
+      { text: '写出第一个算子', link: '/programming-model/first-operator' },
+      { text: '第一个 Cube 算子与第一个 Mix 算子', link: '/programming-model/cube-and-mix' },
+      { text: 'AI CPU 与调度计划', link: '/programming-model/aicpu' },
+      { text: '融合算子的设计方法论', link: '/programming-model/fusion-design' }
+    ]
+  },
+  {
+    text: '工程化与附录',
+    collapsed: false,
+    items: [
+      { text: 'JIT 参数与编译缓存', link: '/programming-model/jit-arguments' },
+      { text: 'torch 接口与 stream 语义', link: '/programming-model/torch-interop' },
+      { text: '编译选项与产物观察', link: '/programming-model/compiler-options' },
+      { text: '高性能算子编写指南', link: '/programming-model/performance' },
+      { text: '调试与精度验证', link: '/programming-model/debugging' },
+      { text: 'AOT 与 Native 算子包', link: '/programming-model/aot-packaging' },
+      { text: '当前限制、迁移与常见问题', link: '/programming-model/limitations' },
+      { text: '概念对照、命名速查与术语表', link: '/programming-model/appendix' }
+    ]
+  }
 ]
 
 export default defineConfig({
@@ -26,6 +78,7 @@ export default defineConfig({
     siteTitle: 'CANNBot-DSL',
     nav: [
       { text: '开始使用', link: '/getting-started/' },
+      { text: '编程模型', link: '/programming-model/' },
       { text: '样例', link: '/examples/' },
       { text: 'API 文档', link: '/api/' },
       { text: '参与贡献', link: '/community/contributing' },
@@ -35,6 +88,7 @@ export default defineConfig({
       ] }
     ],
     sidebar: {
+      '/programming-model/': programmingModelSidebar,
       '/getting-started/': [{ text: '开始使用', collapsed: true, items: guideSidebar }],
       '/guide/': [{ text: '项目指南', collapsed: true, items: guideSidebar }],
       '/examples/': [{ text: '样例', collapsed: true, items: [
@@ -46,6 +100,7 @@ export default defineConfig({
         collapsed: true,
         link: '/api/',
         items: [
+          { text: '装饰器', link: '/api/decorators' },
           { text: 'Host API', link: '/api/host/', collapsed: true, items: [
             { text: 'Host API 概览', link: '/api/host/' },
             { text: '参数与数据描述', link: '/api/host/data-description/README', collapsed: true, items: [
@@ -373,7 +428,7 @@ export default defineConfig({
     lightModeSwitchTitle: '切换到浅色模式',
     darkModeSwitchTitle: '切换到深色模式',
     socialLinks: [
-      { icon: 'github', link: 'https://gitcode.com/cann/cannbot-dsl' }
+      { icon: { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m8 6-6 6 6 6m8-12 6 6-6 6m-2-15-4 18"/></svg>' }, link: 'https://gitcode.com/cann/cannbot-dsl', ariaLabel: 'GitCode 源码仓库' }
     ],
     footer: {
       message: 'CANNBot-DSL 开源项目文档',

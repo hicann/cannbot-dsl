@@ -438,3 +438,10 @@
   line-height: 1.7;
   color: var(--vp-c-text-3);
 }
+
+/* 样例索引保留完整接口名，窄屏在表格内横向滚动。 */
+.examples-index-page .vp-doc table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}

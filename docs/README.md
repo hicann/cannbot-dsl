@@ -1,6 +1,6 @@
 # CANNBot-DSL 文档站
 
-这是 `cannbot-dsl.gitcode.com` 的文档站源码。当前阶段包含站点框架、项目级内容和首批 API 文档，其余 API 将在核对实现后逐步补充。
+这是 `cannbot-dsl.gitcode.com` 的文档站源码。当前阶段包含站点框架、项目级内容、编程模型和首批 API 文档，其余 API 将在核对实现后逐步补充。
 
 ## 本地开发
 
@@ -29,6 +29,7 @@ docs/
 ├── public/           # 静态资源
 ├── getting-started/  # 开始使用
 ├── guide/            # 项目指南
+├── programming-model/ # 编程模型（总览、22 节正文和附录）
 ├── examples/         # 样例导航
 ├── api/              # 公共 API 文档
 ├── community/        # 参与贡献
