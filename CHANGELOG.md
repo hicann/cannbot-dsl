@@ -2,6 +2,10 @@
 
 ## 🔥 更新日志
 
+### 【2026-09-30】
+#### 新特性 New Features
+- 【attn_epilogue】新增 Attention 输出投影融合算子 `attn_epilogue()`：融合 inverse RoPE、两次 OCP MXFP8 激活量化与 WoA/WoB 两级矩阵乘，支持 BF16 输入/输出、E4M3FN 权重与 E8M0 scale，按平台核数和输入规模自适应分块，内部管理工作区。测试覆盖接口契约、分块边界、中间量化结果、输出独立性及图重放一致性；样例文档补充精度验证与清 L2 条件下的小算子拼接性能对比记录。
+
 ### 【2026-09-29】
 #### 新特性 New Features
 - 【attn_prologue】迁入基于 CANNBotDSL 的 MXFP8 attention prologue 融合算子，包含 QA/KV 投影、RMSNorm、QR 动态量化、QB 投影、尾部 RoPE 和 KV cache 原地更新；同步迁入独立 CPU golden、FP64 精度复核与完整用例 runner，新增 4 个 decode/prefill NPU 冒烟用例及 6 个 CPU 精度判据用例并接入 CI 算子清单。

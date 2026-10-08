@@ -15,7 +15,7 @@
 
 > **2026-09-30**
 >
-> - **✅ 支持 DeepSeek V4.1**：本仓算子集已覆盖相关算子，包括 [`indexer_prologue_qw`](samples/indexer_prologue_qw)、[`indexer_prologue_k`](samples/indexer_prologue_k)、[`attn_prologue`](samples/attn_prologue)、[`quant_lightning_indexer_dsl`](samples/quant_lightning_indexer_dsl)、[`quant_sparse_lightning_indexer_dsl`](samples/quant_sparse_lightning_indexer_dsl)、[`mixed_quant_sparse_flash_mla`](samples/mixed_quant_sparse_flash_mla)。
+> - **✅ 支持 DeepSeek V4.1**：本仓算子集已覆盖相关算子，包括 [`indexer_prologue_qw`](samples/indexer_prologue_qw)、[`indexer_prologue_k`](samples/indexer_prologue_k)、[`attn_prologue`](samples/attn_prologue)、[`attn_epilogue`](samples/attn_epilogue)、[`quant_lightning_indexer_dsl`](samples/quant_lightning_indexer_dsl)、[`quant_sparse_lightning_indexer_dsl`](samples/quant_sparse_lightning_indexer_dsl)、[`mixed_quant_sparse_flash_mla`](samples/mixed_quant_sparse_flash_mla)。
 >
 > - **🚀 新增 17 个算子样例，并更新既有算子适配最新 CANNBot-DSL**。例如，[Sparse Flash Attention](samples/sparse_flash_attention) 相比 AscendC 版本，**加速比最高达到 1.63 倍**；[Qwen Sparse Attention](samples/qwen_sparse_attn) 相比 AscendC 版本，长 KV decode 场景**平均加速比达到 1.23 倍**。其余算子的详细信息见[算子列表](#算子列表)。
 >
@@ -23,8 +23,8 @@
 
 <!-- TODO(算子全量合入后)：本节只保留当前这批重大更新，跟随后续合入滚动替换，
      顶部那行日期（现为 2026-09-30）需一并更新为最新一批的合入日期。
-     历史沿革由 CHANGELOG.md 承载，但其首节目前只记到 2026-09-29，且只收录了
-     attn_prologue、batch_matmul、matmul_streamk、quant_batch_matmul_mxa8w4 四条；
+     历史沿革由 CHANGELOG.md 承载，但其首节目前只记到 2026-09-30，且只收录了
+     attn_prologue、attn_epilogue、batch_matmul、matmul_streamk、quant_batch_matmul_mxa8w4 五条；
      engram_gate、indexer_prologue_k、flash_mla_with_kvcache、quant_block_sparse_attn、
      flash_attn 的 metadata 变长序列支持、既有算子适配 0.7.0 的迁移，
      以及 flash_kda_metadata / fused_recurrent_kda_snapshot 两个样例的撤并，均未收录，需补齐。 -->
@@ -192,6 +192,7 @@ python3 -m pytest test/sparse_flash_attention/test_sparse_flash_attention.py -v
 | [mixed_quant_sparse_flash_mla_metadata](samples/mixed_quant_sparse_flash_mla_metadata) | `mixed_quant_sparse_flash_mla_metadata()` | MQSMLA 的 AICPU 分核调度，输出整行 / FlashDecode 分片计划 |
 | [flash_kda](samples/flash_kda) | `flash_kda()`、`flash_kda_metadata()` | Kimi Delta Attention prefill 融合算子，含 AICPU 调度 metadata |
 | [attn_prologue](samples/attn_prologue) | `attn_prologue()` | MXFP8 的 QA/KV 投影、RMSNorm、QR 量化、QB 投影、RoPE 与 KV cache 写回 |
+| [attn_epilogue](samples/attn_epilogue) | `attn_epilogue()` | Attention 输出投影：inverse RoPE、两次 MXFP8 激活量化与 WoA/WoB 两级矩阵乘；BF16 输入/输出，E4M3FN 权重与 E8M0 scale |
 | [indexer_prologue_qw](samples/indexer_prologue_qw) | `indexer_prologue_qw()` | MXFP8 Q GEMM、尾部 RoPE、MXFP4 量化，以及 BF16 W GEMM |
 | [indexer_prologue_k](samples/indexer_prologue_k) | `indexer_prologue_k()` | Indexer K 路前处理：BF16 投影、RMSNorm、RoPE、MXFP4 量化与分页 cache 写入 |
 | [qsa_indexer](samples/qsa_indexer) | `qsa_indexer()`、`qsa_indexer_metadata()` | 压缩 Key 稀疏索引，选高分压缩块并展开为 token 索引 |
@@ -212,8 +213,8 @@ python3 -m pytest test/sparse_flash_attention/test_sparse_flash_attention.py -v
         quant_matmul 的另两个实现、flash_attn_fp8_fullquant、sparse_flash_attention、qwen_sparse_attn、
         flash_mla_with_kvcache、quant_block_sparse_attn、mixed_quant_sparse_flash_mla 及其 metadata、
         indexer_prologue_qw、indexer_prologue_k、qsa_indexer、stem_indexer、QLI/QSLI 及其 metadata、
-        engram_gate 等，需同步。
-     3) figures/ 下 17 张图均已被引用；但 attn_prologue、indexer_prologue_k、mixed_quant_sparse_flash_mla、
+        engram_gate、attn_epilogue 等，需同步。
+     3) figures/ 下 17 张图均已被引用；但 attn_prologue、attn_epilogue、indexer_prologue_k、mixed_quant_sparse_flash_mla、
         qsa_indexer、quant_lightning_indexer_dsl、quant_sparse_lightning_indexer_dsl 等样例的 README
         已给出性能数据，尚无对应性能对比图。
      4) `flash_kda_metadata`、`fused_recurrent_kda_snapshot` 两个样例已在本轮撤并（前者的实现并入
