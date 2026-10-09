@@ -43,7 +43,7 @@
 | --- | --- | --- |
 | UB | 192 KB | **256 KB**（每 AIV；`get_mem_size("ub")` 返回 253952 = 248 KB，顶部 8 KB 预留已扣除） |
 | L0C | 128 KB | **256 KB** |
-| 矢量编程模式 | 仅 SIMD | **SIMD + SIMT 混合**（`vf(mode=...)`，以 SIMD 为主） |
+| 矢量编程模式 | 仅 SIMD | **SIMD + SIMT 混合或纯 SIMT**（`vf(mode=...)`；混合编程以 SIMD 为主） |
 | BiasTable | 1 KB | **4 KB** |
 | Fixpipe Buffer | 2 KB | **4 KB** |
 | L1 / L0A / L0B | 512 KB / 64 KB / 64 KB | 不变 |
@@ -158,7 +158,7 @@ info.ai_cpu_num        # AI CPU 数
 | **Mix 算子** | 一个 group 内同时使用 AIC 与 AIV 的算子 |
 | **VF（Vector Function）** | `with vf(...)` 圈出的一段矢量计算。每个 VF 独立选择 SIMD 或 SIMT 实现 |
 | **SIMD 模式** | `vf(mode="simd")`，寄存器级单指令多数据，lane 由掩码控制。950 上的主力范式 |
-| **SIMT 模式** | `vf(mode="simt", thread=N)`，单指令多线程，每线程独立地址空间与控制流。用于不规则控制流与 gather/scatter |
+| **SIMT 模式** | 单指令多线程，每线程独立计算地址并可走不同控制流。混合编程用 `vf(mode="simt", thread=N)`，纯 SIMT 用 `vf(mode="simt")` 并从 Host 传入线程维度；用于不规则控制流与 gather/scatter，需 CANN 9.2.0 及以上版本 |
 | **VF 融合** | 编译器把控制流等价的相邻 VF 合并，消除中间结果落 UB |
 | **Hardware Loop** | 满足编码规范的循环被降成硬件循环；否则退化为软件循环 |
 | **lane** | 矢量寄存器里的一个元素槽 |

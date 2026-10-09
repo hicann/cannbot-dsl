@@ -147,12 +147,14 @@ program(x, y, out)
 
 ### `@kernel`：设备代码
 
-`@kernel` 定义在 AI Core 上执行的函数，返回值应为 `None`。启动语法是方括号加 block 数量：
+`@kernel` 定义在 AI Core 上执行的函数，返回值应为 `None`。SIMD 与混合 SIMD + SIMT Kernel 在方括号内指定整数 block 数量：
 
 ```python
 add_kernel[8](x, y, out)   # 启动 8 个 block
 add_kernel(x, y, out)      # 省略时默认为 1
 ```
+
+纯 SIMT Kernel 则由 Host 传 `dim3(block)` 和 `dim3(thread)`；两种启动形式见[SIMT · Host 启动规则](/programming-model/compute#host-启动规则)。SIMT 需要 CANN 9.2.0 及以上版本。
 
 `@kernel` 也可以装饰类，用于组织多个相关的 Kernel 方法和共享配置：
 

@@ -10,6 +10,7 @@ Ascend 950 的对外宣传里有几项能力，当前**没有**由 DSL 0.7.0 暴
 | --- | --- |
 | SIMD 矢量编程（RegBase） | ✓ 完整支持，`with vf(mode="simd")` |
 | **SIMD + SIMT 混合编程** | ✓ **支持**。`with vf(mode="simt", thread=N)` 加 `cannbotdsl.ops.simt` 的线程 / warp / 原子接口，见[三类计算单元](/programming-model/compute#simt-模式) |
+| **纯 SIMT 编程** | ✓ **支持**。设备侧使用 `vf(mode="simt")`，Host 侧使用 `kernel[dim3(block), dim3(thread), dyn_ub_buf](...)`，见[Host 启动规则](/programming-model/compute#host-启动规则) |
 | HiF8 / FP8 / MXFP8 / MXFP4 矩阵乘 | ✓ 支持，见[数据类型与量化](/programming-model/data-types) |
 | HF32 | ✓ 支持（`enable_hf32` / `set_hf32_round_mode` / `set_fp32_mode`；**没有** `enable_hf32_trans`） |
 | **4:2 结构化稀疏** | **硬件已取消**。3510 不支持 4:2 稀疏矩阵乘，需要用 Vector 自己做稠密↔稀疏转换 |
@@ -25,12 +26,14 @@ Ascend 950 的对外宣传里有几项能力，当前**没有**由 DSL 0.7.0 暴
 
 跨代的完整变更对照见[附录](/programming-model/appendix)。
 
+SIMD + SIMT 混合编程和纯 SIMT 编程都需要 CANN 9.2.0 及以上版本。
+
 ## 入口与装饰器
 
 | 写法 | 现状 |
 | --- | --- |
 | 普通 Python 直接调 `@kernel` / `@jit` | 不支持。外部入口应是 `@host`，再由 `@host` 启动 Kernel |
-| `@jit` 里写 `kernel[block_dim](...)` | 不支持。启动语句必须直接位于 `@host` 函数体 |
+| `@jit` 里启动 Kernel（包括 `kernel[block_dim](...)` 和纯 SIMT 的 `kernel[dim3(block), dim3(thread)](...)`） | 不支持。启动语句必须直接位于 `@host` 函数体 |
 | 用 `@jit` 包一层 `run()` 当编译入口 | 官方装饰器页不允许；部分 API 示例仍这样写，不要当模板抄 |
 | `@host` 里用 `const_expr()` 做设备分支 | 官方控制流页只承认 `@jit` / `@kernel`。`@host` 上条件已是 Python 布尔值时，直接写 `if` |
 | `@kernel` 之间互相启动 | 不支持 |

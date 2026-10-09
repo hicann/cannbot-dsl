@@ -305,6 +305,10 @@ def _compute_y(self, x_ch, gamma_buf, y_buf, rstd_buf, w, cur_rf):
 
 ## SIMT 模式
 
+::: warning CANN 版本要求
+使用 SIMT（包括 SIMD + SIMT 混合编程和纯 SIMT 编程）需要 CANN 9.2.0 及以上版本。
+:::
+
 ::: info 包内可用 · 文档站未收录
 本节依据 `cannbotdsl/lang/vf.py` 与 `cannbotdsl/ops/simt.py` 的包源码整理，并与昇腾 950 NPU 架构白皮书的描述对齐。官方 API 文档站目前没有 SIMT 分区，接口稳定性没有承诺。
 :::
@@ -313,33 +317,87 @@ def _compute_y(self, x_ch, gamma_buf, y_buf, rstd_buf, w, cur_rf):
 
 SIMD 的 lane 是靠掩码控制的：每条 lane 做同样的事，只有「参不参与」的区别。遇到**不规则控制流**和 **gather / scatter**，掩码就不够用了——你得把分支铺平成「做几次」，把离散访存拆成一堆 `vgather`。
 
-SIMT 换一种抽象：一个指令驱动多个线程，**每个线程有自己独立的地址空间和控制流**。白皮书的分工建议很直接：
+SIMT 换一种抽象：一个指令驱动多个线程，**每个线程独立计算地址，也可以走不同的控制流**。白皮书的分工建议很直接：
 
 > 对于以规则访存为主的 element-wise 计算，优先采用 SIMD 模式以获得高带宽与高算力利用率；而对于不规则或包含分支的部分，采用 SIMT 模式以缓解 gather/scatter 操作带来的控制复杂度。
 
-两种模式的基本单位都是 **VF（Vector Function）**，每个 VF 二选一，并且支持在相邻的两类 VF 之间快速切换。这正是 DSL 里 `vf(mode=...)` 的来历。
+SIMD 与 SIMT 都以 **VF（Vector Function）** 标出计算区域，一个 VF 只选一种模式。一个 Kernel 可以串接两类 VF，也可以只包含 SIMT VF；这两种 Kernel 的**线程数来源和 Host 启动形式不同**。
 
-### 怎么写
+### 两种 SIMT 编程模型
+
+| 模型 | 设备侧 VF | Host 侧启动 | 线程数来源 |
+| --- | --- | --- | --- |
+| SIMD + SIMT 混合 | 同一 Kernel 中既有 SIMD 计算，又有 `vf(mode="simt", thread=N)` | `kernel[block_count](...)` | SIMT VF 的 `thread=N`；Host 不传 thread 维度 |
+| 纯 SIMT | 仅有 SIMT VF，使用 `vf(mode="simt")` | `kernel[dim3(block), dim3(thread), dyn_ub_buf](...)` | Host 的 `dim3(thread)`，设备侧通过 `simt.thread_dim()` 获取 |
+
+这里的 `thread=N` 是 **VF 参数**，而 `dim3(thread)` 是 **Host 启动参数**；不能互换。`vf()` 的完整签名是 `vf(*, mode="simd", thread=None, unroll=1, outputs=None)`。两个模式都不接受 `unroll != 1` 或 `outputs` 非默认值；循环展开应写在 `cbd.range()` 上。
+
+### SIMD + SIMT 混合编程
+
+同一 Kernel 先用 SIMD 处理规则数据，再用 SIMT 处理逐线程逻辑。下例中 SIMD 把值写入 UB，SIMT 线程从 UB 读取后写出。
 
 ```python
 import cannbotdsl as cbd
+from cannbotdsl import MemLoc, Tensor, dtypes
+from cannbotdsl.buffer import Buffer
+from cannbotdsl.lang.vf import vf
+from cannbotdsl.ops.reg import full_mask, vdups, vstore
+
+
+@cbd.kernel
+def mixed_kernel(dst: Tensor):
+    buf = Buffer(MemLoc.UB, (128,), dtypes.float32)
+    with vf(mode="simd"):
+        mask = full_mask()
+        value = vdups(1.0, dtypes.float32, mask=mask)
+        vstore(buf, 0, value, mask)
+        vstore(buf, 64, value, mask)
+    with vf(mode="simt", thread=128):
+        i = cbd.simt.thread_idx()[0]
+        if i < cbd.simt.thread_dim()[0]:
+            dst[i] = buf[i]
+
+
+@cbd.host
+def run_mixed(dst: Tensor):
+    mixed_kernel[1](dst)  # 整数 block 数；线程宽度在 SIMT VF 中指定
+```
+
+混合 Kernel 的 Host 启动形式与 SIMD Kernel 一样，只指定 block 数。`thread=128` 只控制当前 SIMT VF 的线程宽度；相邻的 SIMD VF 仍按 SIMD 寄存器与 lane 模型编程。
+
+### 纯 SIMT 编程
+
+如果 Kernel 只有逐线程 SIMT 计算，用 `vf(mode="simt")`，并由 Host 显式给出 block 网格和每个 block 的线程维度。
+
+```python
+import cannbotdsl as cbd
+from cannbotdsl import Tensor, dim3
 from cannbotdsl.lang.vf import vf
 
 
 @cbd.kernel
-def k(gm_in, gm_out):
-    with vf(mode="simt", thread=256):
-        tx, ty, tz = cbd.simt.thread_idx()
-        dx, dy, dz = cbd.simt.thread_dim()
-        ...
+def pure_kernel(src: Tensor, dst: Tensor):
+    with vf(mode="simt"):
+        i = cbd.simt.block_idx()[0] * cbd.simt.thread_dim()[0] + cbd.simt.thread_idx()[0]
+        if i < 256:
+            dst[i] = src[i]
+
+
+@cbd.host
+def run_pure(src: Tensor, dst: Tensor):
+    pure_kernel[dim3(2), dim3(128), 0](src, dst)
 ```
 
-| 参数 | 说明 |
-| --- | --- |
-| `mode="simt"` | 选择 SIMT 模式 |
-| `thread=N` | 启动宽度。省略时按运行期线程数处理 |
+`dim3(x, y=1, z=1)` 可描述一至三维 block 网格与线程布局。这里启动 2 个 block，每个 block 128 个线程；`simt.block_idx()`、`simt.thread_idx()` 和 `simt.thread_dim()` 用来计算全局位置。`dyn_ub_buf` 是可选的非负整数，省略时为 0，因此也可以写成 `pure_kernel[dim3(2), dim3(128)](src, dst)`。
 
-`vf()` 的完整签名是 `vf(*, mode="simd", thread=None, unroll=1, outputs=None)`。两个模式都**不接受** `unroll != 1`（会直接 `ValueError`）——`unroll` 是 `cbd.range()` 的参数，不是 `vf()` 的。
+### Host 启动规则
+
+两种入口都必须由 `@host` 函数体直接启动；普通 Python 调用 `@host`，或用 `cbd.compile(host_fn, ...)` 提前编译，规则与其他 Kernel 相同。区别只在方括号内的配置：
+
+- **混合 SIMD + SIMT：** `kernel[block_count](...)`，`block_count` 是整数；SIMT VF 显式指定 `thread=N`。不能传 Host 线程维度或 `dyn_ub_buf`。
+- **纯 SIMT：** `kernel[dim3(block), dim3(thread), dyn_ub_buf](...)`，前两项都必须是 `dim3`；`dyn_ub_buf` 可省略。每个 block 的线程数为 `thread.x * thread.y * thread.z`，范围是 1 到 1024。
+
+纯 SIMT 不能在设备侧写固定的 `vf(mode="simt", thread=N)` 后再从 Host 传 `dim3(thread)`；混合 Kernel 也不能用纯 SIMT 的 `dim3` 启动形式。编译器会校验这两类配置。
 
 ### 接口分类
 

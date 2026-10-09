@@ -197,7 +197,7 @@ with vf(mode="simd"):                # ✓ 展开写在循环上
         ...
 ```
 
-`thread` 只对 `mode="simt"` 有意义，见[三类计算单元 · SIMT 模式](/programming-model/compute#simt-模式)。
+`thread` 只对 `mode="simt"` 有意义：混合 SIMD + SIMT 编程由 VF 的 `thread=N` 指定线程数；纯 SIMT 编程省略该参数，由 Host 的 `dim3(thread)` 指定。见[两种 SIMT 编程模型](/programming-model/compute#两种-simt-编程模型)。
 
 ## 排查速查
 

@@ -278,7 +278,7 @@ mem_copy(l1_a.produce(), gm_a_tile, engine=nd2nz)
 | 取一个 tile 的视图 | `tile_slice(tensor, tiler, coord)` |
 | 做矩阵乘 | `matmul(l0c, l0a, l0b, init=...)` |
 | 做矢量计算（SIMD） | `with vf(mode="simd"):` 内的 `v*` 接口 |
-| 做矢量计算（SIMT） | `with vf(mode="simt", thread=N):` 内的 `cbd.simt.*` 接口 |
+| 做矢量计算（SIMT） | 混合模式用 `vf(mode="simt", thread=N)`，纯 SIMT 用 `vf(mode="simt")`；作用域内调用 `cbd.simt.*`，见[两种编程模型](/programming-model/compute#两种-simt-编程模型) |
 | 核间同步 | `*_sync_block_*` / `*_sync_intra_*` / `global_sync_all()` |
 | 查硬件参数 | `get_platform_info()` / `get_mem_size()` |
 | 查当前周期数（性能分析） | `get_system_cycle()` |

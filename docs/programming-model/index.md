@@ -43,7 +43,7 @@ CANNBot-DSL 是一个**显式**的 DSL：它不替你决定数据放在哪一级
 | 6 | [数据、布局与切块](/programming-model/data-and-layout) | Shape/Stride/Layout/Tensor、逻辑布局与物理布局、`tile_slice` |
 | 7 | [片上存储、流水与 GM 协作](/programming-model/onchip-memory) | `Buffer` 与 `Channel`、double buffer、UB 预算、bank 冲突、workspace |
 | 8 | [矢量寄存器与 lane 模型](/programming-model/vector-registers) | VL = 256 字节、lane 怎么排、寄存器预算、掩码与 lane 的关系 |
-| 9 | [三类计算单元](/programming-model/compute) | Cube 矩阵乘流程、VF 寄存器级矢量计算、SIMD 与 SIMT 两种模式、Scalar 与原子操作 |
+| 9 | [三类计算单元](/programming-model/compute) | Cube 矩阵乘流程、VF 寄存器级矢量计算、SIMD + SIMT 混合与纯 SIMT 的启动方式、Scalar 与原子操作 |
 | 10 | [数据类型与量化](/programming-model/data-types) | HiF8、MXFP8/MXFP4、scale 存在哪里、谁负责搬 |
 | 11 | [同步、Cache 与跨核交接](/programming-model/synchronization) | 框架替你同步什么、剩下四类同步怎么写 |
 
@@ -101,7 +101,7 @@ CANNBot-DSL 是一个**显式**的 DSL：它不替你决定数据放在哪一级
 | 昇腾产品 | Ascend 950PR / Ascend 950DT（NPU ARCH 3510），950PR 的加速卡形态为 Atlas 350 |
 | CPU 架构 | x86_64 / aarch64 |
 | Python | 3.10、3.11、3.12 |
-| CANN | 建议 9.2.0-beta.2 |
+| CANN | 建议 9.2.0-beta.2(SIMT 必须 9.2.0 及以上版本) |
 | CANNBot-DSL | 0.7.0 |
 | torch | 2.7.1 / 2.9.0 / 2.10.0 / 2.11.0 / 2.12.0 |
 
