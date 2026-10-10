@@ -2,6 +2,18 @@
 
 ## 🔥 更新日志
 
+### 【2026-10-08】
+#### 新特性 New Features
+- 【block_attn_res_update_rms_norm】迁入 Block Attention Residual Update 与 RMSNorm 融合算子：将本层增量 `delta` 加到当前残差块，结合 `pseudo_query` 分数与 online-softmax 累积结果合并，再沿隐藏维做 RMSNorm 并乘缩放权重 `gamma`；同步注册 profiling identity（`op_type=BlockAttnResUpdateRMSNorm`）。
+- 【fused_recurrent_kda_snapshot】迁入 KDA decode 算子 `fused_recurrent_kda()`：计算 1～8 token 的 KDA decode，并把每个 token 的递归状态写入 state-pool 槽位，用于为候选分支保存完整状态的 Snapshot 协议。
+- 【mega_recurrent_kda】迁入多 batch decode 融合算子：将 QKV、decay、beta、output-gate 投影、causal Conv1D + SiLU、Q/K 归一化、recurrent KDA、RMSNorm、output gating 和输出投影融合为一次 mixed AIC/AIV kernel 调用。
+- 【mega_recurrent_kda_replayssm】迁入 ReplaySSM verify 算子：将 QKV、decay、beta、gating 和输出投影融合为一次 mixed AIC/AIV kernel 调用。
+- 【commit_recurrent_kda_replayssm】迁入 ReplaySSM 提交算子：根据 Mega ReplaySSM 保存的 replay record，将每个 batch 已接受的 token 依次提交到递归状态。
+- 【quant_mla_prolog】迁入 AW1 MLA Prolog 算子，支持 BF16 非量化输出（C0）与 MXFP8 量化输出。
+
+#### 特性增强 Feature Enhancement
+- 【flash_kda】同步最新实现：适配 CANNBotDSL 0.7 前向路径，重构 packed32 `_cube_raw_l1_to_l0b` 为 reinterpret+mem_copy，并新增 `cube_raw_l1_to_l0a/b` 辅助路径。
+
 ### 【2026-09-30】
 #### 新特性 New Features
 - 【attn_epilogue】新增 Attention 输出投影融合算子 `attn_epilogue()`：融合 inverse RoPE、两次 OCP MXFP8 激活量化与 WoA/WoB 两级矩阵乘，支持 BF16 输入/输出、E4M3FN 权重与 E8M0 scale，按平台核数和输入规模自适应分块，内部管理工作区。测试覆盖接口契约、分块边界、中间量化结果、输出独立性及图重放一致性；样例文档补充精度验证与清 L2 条件下的小算子拼接性能对比记录。

@@ -37,3 +37,9 @@ operators:
   - quant_sparse_lightning_indexer_metadata_dsl
   - mixed_quant_sparse_flash_mla
   - mixed_quant_sparse_flash_mla_metadata
+  - block_attn_res_update_rms_norm
+  - fused_recurrent_kda_snapshot
+  - mega_recurrent_kda
+  - mega_recurrent_kda_replayssm
+  - commit_recurrent_kda_replayssm
+  - quant_mla_prolog

@@ -77,6 +77,54 @@ flash_kda:
   options:
     - flash_kda
 
+block_attn_res_update_rms_norm:
+  module: True
+  src:
+    - samples/block_attn_res_update_rms_norm
+    - test/block_attn_res_update_rms_norm
+  options:
+    - block_attn_res_update_rms_norm
+
+fused_recurrent_kda_snapshot:
+  module: True
+  src:
+    - samples/fused_recurrent_kda_snapshot
+    - test/fused_recurrent_kda_snapshot
+  options:
+    - fused_recurrent_kda_snapshot
+
+mega_recurrent_kda:
+  module: True
+  src:
+    - samples/mega_recurrent_kda
+    - test/mega_recurrent_kda
+  options:
+    - mega_recurrent_kda
+
+mega_recurrent_kda_replayssm:
+  module: True
+  src:
+    - samples/mega_recurrent_kda_replayssm
+    - test/mega_recurrent_kda_replayssm
+  options:
+    - mega_recurrent_kda_replayssm
+
+commit_recurrent_kda_replayssm:
+  module: True
+  src:
+    - samples/commit_recurrent_kda_replayssm
+    - test/commit_recurrent_kda_replayssm
+  options:
+    - commit_recurrent_kda_replayssm
+
+quant_mla_prolog:
+  module: True
+  src:
+    - samples/quant_mla_prolog
+    - test/quant_mla_prolog
+  options:
+    - quant_mla_prolog
+
 # 文件级路由：matmul/matmul 与 matmul/quant_matmul 目录内混有尚未适配
 # cannbotdsl 0.6.0 接口的存量样例，新增样例按精确文件路径触发各自的
 # 测试文件，避免连带触发同目录存量样例的用例。

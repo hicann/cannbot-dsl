@@ -48,13 +48,29 @@ if [ -z "$_PYTHON" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 1. Ensure oat-py is installed
+# 1. Ensure oat-py is installed (serialized: concurrent pre-commit invocations
+#    racing `pip install` into the same site-packages corrupt each other)
 # ---------------------------------------------------------------------------
-_OAT_OK=$("$_PYTHON" -c "import importlib.util; print('ok' if importlib.util.find_spec('oat') else 'missing')" 2>/dev/null || echo "missing")
+_OAT_SPEC='import importlib.util; print("ok" if importlib.util.find_spec("oat") else "missing")'
+_OAT_LOCK="${TMPDIR:-/tmp}/oat-py-install.lock"
+_OAT_OK=$("$_PYTHON" -c "$_OAT_SPEC" 2>/dev/null || echo "missing")
 if [ "$_OAT_OK" != "ok" ]; then
-    echo "[OAT] oat-py not found. Installing oat-py>=1.0.1 ..."
-    "$_PYTHON" -m pip install --quiet "oat-py>=1.0.1"
-    _OAT_OK=$("$_PYTHON" -c "import importlib.util; print('ok' if importlib.util.find_spec('oat') else 'missing')" 2>/dev/null || echo "missing")
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$_OAT_LOCK"
+        flock -x 9
+    fi
+    # Re-check inside the lock: another invocation may have finished installing.
+    _OAT_OK=$("$_PYTHON" -c "$_OAT_SPEC" 2>/dev/null || echo "missing")
+    if [ "$_OAT_OK" != "ok" ]; then
+        echo "[OAT] oat-py not found. Installing oat-py>=1.0.1 ..."
+        "$_PYTHON" -m pip install --quiet --no-cache-dir "oat-py>=1.0.1" \
+            || { sleep 3; "$_PYTHON" -m pip install --quiet --no-cache-dir "oat-py>=1.0.1"; }
+        _OAT_OK=$("$_PYTHON" -c "$_OAT_SPEC" 2>/dev/null || echo "missing")
+    fi
+    if command -v flock >/dev/null 2>&1; then
+        flock -u 9
+        exec 9>&-
+    fi
     if [ "$_OAT_OK" != "ok" ]; then
         echo "[OAT] [WARNING] Failed to install oat-py. Please run: pip install oat-py>=1.0.1"
         echo "[OAT] Skipping OAT check, continuing commit..."

@@ -1,0 +1,230 @@
+# mega_recurrent_kda_replayssm
+
+## 产品支持情况
+
+- Ascend 950：支持。
+- AIC 核数：支持 8、24、28、32；默认从输入设备当前 stream 的有效配额读取，并按 32 核封顶。
+
+## 功能说明
+
+`mega_recurrent_kda_replayssm` 执行 ReplaySSM verify，将 QKV、decay、beta、
+output-gate 投影，causal Conv1D + SiLU，recurrent KDA、RMSNorm、output
+gating 和输出投影融合为一次 mixed AIC/AIV kernel 调用。实现位于
+[`mega_recurrent_kda_replayssm.py`](mega_recurrent_kda_replayssm.py)。
+
+算子读取 FP32 checkpoint `recurrent_state`，计算全部 8 个候选 token，
+并写出 Commit 所需的 replay record：
+
+- `replay_u`：FP16 `[B, 8, 6, 128]`；
+- `replay_k`：FP16 `[B, 8, 6, 128]`；
+- `replay_decay`：FP32 `[B, 8, 6, 128]`。
+
+算子不修改 `recurrent_state`。Conv1D 使用独立的 `conv_state_indices` 和
+`conv_num_accepted_tokens`，并原地更新 `conv_state`。
+
+一个 compiled callable 覆盖 8/24/28/32 AIC。`B` 按 16 的倍数取值；
+当前 Python 接口使用 B16 调度，native binary 支持 `B=16,32,…,256`。
+模块同时提供 native binary 注册和 `torch.compile` 图模式注册。
+
+### 计算过程
+
+算子按以下顺序执行：
+
+1. 将 hidden states 投影为 Q/K/V、decay、beta 和 output gate。
+2. 对 Q/K/V 执行 causal Conv1D 和 SiLU，并归一化 Q/K。
+3. 从 `recurrent_state` 计算 8 个候选 token，写出 U/K/decay replay record。
+4. 对 KDA 输出执行 RMSNorm、sigmoid gating 和输出投影。
+
+## 函数原型
+
+```python
+mega_recurrent_kda_replayssm.mega_recurrent_kda_replayssm.mega_recurrent_kda_replayssm(
+    hidden_states: torch.Tensor,
+    qkv_projection_weight: torch.Tensor,
+    decay_projection_a_weight: torch.Tensor,
+    decay_projection_b_weight: torch.Tensor,
+    beta_projection_weight: torch.Tensor,
+    output_gate_projection_weight: torch.Tensor,
+    output_norm_weight: torch.Tensor,
+    output_projection_weight: torch.Tensor,
+    conv1d_weight: torch.Tensor,
+    conv_state: torch.Tensor,
+    recurrent_state: torch.Tensor,
+    replay_u: torch.Tensor,
+    replay_k: torch.Tensor,
+    replay_decay: torch.Tensor,
+    conv_state_indices: torch.Tensor,
+    conv_num_accepted_tokens: torch.Tensor,
+    a_log: torch.Tensor,
+    dt_bias: torch.Tensor,
+    scale: float,
+    lower_bound: float,
+    rms_norm_eps: float = 1e-5,
+    block_num: Optional[int] = None,
+) -> torch.Tensor
+```
+
+模块路径为 `mega_recurrent_kda_replayssm.mega_recurrent_kda_replayssm`。
+除 `rms_norm_eps` 和 `block_num` 外，其余参数均为必选。
+动态图直接调用上面的 Python 函数；图模式仍调用同一函数，Dynamo 会将其替换为
+`torch.ops.cannbotdsl_mega_recurrent_kda_replayssm.mega_recurrent_kda_replayssm`。
+native binary 注册名为 `mega_recurrent_kda_replayssm`。
+
+## 参数说明
+
+`B` 为 batch 数，`S = 8`，`H = 7168`，`N = 6`，`D = 128`，
+`P = N * D = 768`。输入布局固定为 BSH。
+
+| 参数名 | 参数类型 | 可选/必选 | 描述 | 数据类型/存储 | 维度(shape) |
+|:---|:---|:---|:---|:---|:---|
+| `hidden_states` | Tensor | 必选 | 输入 hidden states。 | bfloat16 / ND | `[B, S, H]` |
+| `qkv_projection_weight` | Tensor | 必选 | Q/K/V 投影，输出顺序为 Q、K、V。 | bfloat16 / NZ | `[3*P, H]` |
+| `decay_projection_a_weight` | Tensor | 必选 | decay 第一级投影。 | bfloat16 / NZ | `[D, H]` |
+| `decay_projection_b_weight` | Tensor | 必选 | decay 第二级投影。 | bfloat16 / NZ | `[P, D]` |
+| `beta_projection_weight` | Tensor | 必选 | 每个 head 的 beta 投影。 | bfloat16 / NZ | `[N, H]` |
+| `output_gate_projection_weight` | Tensor | 必选 | output-gate 投影。 | bfloat16 / NZ | `[P, H]` |
+| `output_norm_weight` | Tensor | 必选 | 各 head 共享的 RMSNorm 权重。 | float32 / ND | `[D]` |
+| `output_projection_weight` | Tensor | 必选 | 输出投影。 | bfloat16 / NZ | `[H, P]` |
+| `conv1d_weight` | Tensor | 必选 | Q/K/V Conv1D 权重；推荐首个 shape。 | bfloat16 / ND | `[3, N, 4, D]`；兼容 `[4, 3*P]`、`[3, 4, D]` |
+| `conv_state` | Tensor | 必选 | Conv state 池，原地更新。 | bfloat16 / ND | `[C, L, 3*P]` |
+| `recurrent_state` | Tensor | 必选 | Verify 使用的只读 checkpoint。 | float32 / ND | `[B, N, D, D]` |
+| `replay_u` | Tensor | 必选 | U replay record 输出。 | float16 / ND | `[B, S, N, D]` |
+| `replay_k` | Tensor | 必选 | K replay record 输出。 | float16 / ND | `[B, S, N, D]` |
+| `replay_decay` | Tensor | 必选 | decay replay record 输出。 | float32 / ND | `[B, S, N, D]` |
+| `conv_state_indices` | Tensor | 必选 | 每个 batch 的 Conv state 槽位。 | int32 / ND | `[B]` |
+| `conv_num_accepted_tokens` | Tensor | 必选 | 选择 Conv 历史起点的 accepted 计数。 | int32 / ND | `[B]` |
+| `a_log` | Tensor | 必选 | 每个 head 的 log decay 参数。 | float32 / ND | `[N]` |
+| `dt_bias` | Tensor | 必选 | 每个 head、每个通道的 decay bias。 | float32 / ND | `[N, D]` |
+| `scale` | float | 必选 | 有限的 query scale。 | float32 | - |
+| `lower_bound` | float | 必选 | decay gate 下界，范围为 `[-5, 0]`。 | float32 | - |
+| `rms_norm_eps` | float | 可选 | 有限且大于零的 RMSNorm epsilon，默认值为 `1e-5`。 | float32 | - |
+| `block_num` | int | 可选 | AIC 核数；可取 `8`、`24`、`28`、`32`，默认自动选择。 | - | - |
+
+## 返回值说明
+
+| 参数名 | 参数类型 | 可选/必选 | 描述 | 数据类型 | 维度(shape) |
+|:---|:---|:---|:---|:---|:---|
+| `out` | Tensor | 必选 | 输出 hidden states。 | bfloat16 | `[B, S, H]` |
+
+算子还会原地更新 `conv_state`、`replay_u`、`replay_k` 和
+`replay_decay`。`recurrent_state` 保持不变。
+
+## 约束说明
+
+- `B` 必须是 16 的倍数：当前 Python 接口支持 `B=16`，native binary 导出规格
+  支持 `B=16,32,…,256`。固定 `S = 8`、`H = 7168`、`N = 6`、`D = 128`。
+- 所有 Tensor 必须连续并位于同一 NPU。
+- 六个投影权重必须使用 `FRACTAL_NZ`，逻辑 shape 保持输出通道在前。
+  必须传 allocation-root Tensor，不能传 view；`torch.nn.Parameter` 先调用
+  `.detach()`。
+- beta 权重必须对完整逻辑 `[6,H]` allocation root 做 NZ 转换，保留物理 padding。
+- `conv1d_weight` 和 `output_norm_weight` 使用 ND。兼容 Conv 布局会在每次调用时转换，推荐预先准备 `[3,N,4,D]`。
+- `conv_state` 要求 `L >= S + 2`。`conv_state_indices` 的每个元素必须位于
+  `[0, C)`，同一次调用中的非零槽位不能重复。
+- `conv_num_accepted_tokens` 的每个元素必须位于 `[0, 8]`。
+- `scale`、`lower_bound`、`rms_norm_eps` 均作为运行时 FP32 scalar 传入；
+  修改这些值不会重新编译。`scale` 必须有限，`lower_bound` 必须位于
+  `[-5,0]`，`rms_norm_eps` 必须有限且大于零。
+- 算子计算全部 8 个 proposal token，并覆盖全部 replay record；accepted 结果由后续 Commit 接口消费，不截断 verify 输出。
+- `block_num=None` 时，算子读取当前 stream 的有效 AIC 配额，并选择不超过
+  该配额的最大支持值。显式值不得超过有效 AIC 配额。
+- 索引和 accepted 数值不拷回 host 校验，调用方必须满足上述范围。
+- 一个 compiled callable 复用四种核数；scratch 的设备或 shape 变化时重新分配。模块只保留一份无 cache key 的 compiled callable 和 scratch，并发调用须由调用方串行化。
+
+### 状态语义
+
+Conv 索引范围为 `[0,C)`。槽 0 是不可写的空槽，对应 Conv 输出为零；同一次
+调用中的非零索引不能重复。历史起点为
+`max(conv_num_accepted_tokens[b]-1,0)`，要求 `L>=10` 且起点加 3 不超过 L。
+非空槽的最后两行所选历史写入 `[0:2]`，本轮原始 QKV 投影写入 `[2:10]`。
+
+`recurrent_state[b]` 是 batch `b` 的只读 FP32 checkpoint。Verify 从该
+checkpoint 计算全部 8 个候选 token，但不原地提交 state。每个 token 的
+FP16 U、FP16 归一化 K 和 FP32 激活后 decay 分别写入 `replay_u`、
+`replay_k` 和 `replay_decay`，由独立的
+[`commit_recurrent_kda_replayssm`](../commit_recurrent_kda_replayssm/README.md)
+按接受前缀提交。
+
+### 调度与 workspace
+
+内核固定按一个 B16 group 调度；运行时 `get_block_num()` 在同一 mixed kernel
+中选择 8/24/28/32 AIC 分支。每个分支均执行两轮 recurrent KDA，并使用对应的
+输出投影配置。
+
+| AIC 核数 | OProj N tile | OProj KS | 每核 tile 数上限 | L0C depth | resident weight |
+|---:|---:|---:|---:|---:|:---:|
+| 8 | 128 | 64 | 7 | 2 | 否 |
+| 24 | 256 | 64 | 2 | 2 | 否 |
+| 28 | 256 | 64 | 1 | 1 | 是 |
+| 32 | 256 | 64 | 1 | 1 | 是 |
+
+GM workspace 固定按 B16、S8 分配 7 个 BF16 区域，宽度为
+`(768,768,768,768,768,16,128)`，另有 FP32 `[128,128]` norm scratch。
+Replay U/K/decay 是调用方提供的独立输出，不属于 workspace。
+
+## 确定性计算
+
+当前样例未提供逐位确定性保证，精度测试按数值容差校验。
+
+## 调用示例
+
+投影权重在模型初始化时转换为 `FRACTAL_NZ`，后续调用直接复用：
+
+```python
+import torch
+import torch_npu
+
+from mega_recurrent_kda_replayssm.mega_recurrent_kda_replayssm import (
+    mega_recurrent_kda_replayssm,
+)
+
+def to_nz(weight):
+    return torch_npu.npu_format_cast(
+        weight.detach().to(device="npu", dtype=torch.bfloat16).contiguous(),
+        torch_npu.Format.FRACTAL_NZ,
+    )
+
+qkv_weight = to_nz(qkv_weight)
+decay_a_weight = to_nz(decay_a_weight)
+decay_b_weight = to_nz(decay_b_weight)
+beta_weight = to_nz(beta_weight)
+output_gate_weight = to_nz(output_gate_weight)
+output_projection_weight = to_nz(output_projection_weight)
+
+out = mega_recurrent_kda_replayssm(
+    hidden_states,
+    qkv_weight, decay_a_weight, decay_b_weight, beta_weight,
+    output_gate_weight, output_norm_weight, output_projection_weight,
+    conv1d_weight, conv_state, recurrent_state,
+    replay_u, replay_k, replay_decay,
+    conv_state_indices, conv_num_accepted_tokens,
+    a_log, dt_bias,
+    128 ** -0.5, -5.0, 1e-5, 32,
+)
+```
+
+## 精度测试
+
+在仓库根目录运行独立测试：
+
+```bash
+python -m pytest -q \
+  test/mega_recurrent_kda_replayssm/test_mega_recurrent_kda_replayssm.py
+```
+
+测试与当前 `mega_recurrent_kda` 的输出、Conv state 和逐 token state snapshot
+对照。覆盖 `B=16`、`block_num=8/24/28/32`、checkpoint 只读、replay
+record 完整性、动态图接口和 `torch.compile(fullgraph=True)` 注册。输出与
+reference 使用 `atol=rtol=0.005`；只读 checkpoint 使用零容差。
+
+## 性能
+
+以下结果于 2026-09-21 在 Ascend950PR_9599 上使用 CANN 9.2、
+CANNBot-DSL 和 msprof 采集。形状为
+`B=16, S=8, H=7168, N=6, D=128`，使用 32 AIC 和 NZ 权重。
+
+| 测试范围 | 统计口径 | 时间 (us) |
+|:---|:---|---:|
+| ReplaySSM verify kernel | MIX_AIC Task Duration 中位数 | 74.137 |
+
+表中数据不包含独立 Commit kernel。
