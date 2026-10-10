@@ -29,7 +29,7 @@
 # 用途：大批量代码集中合入期间临时降低测试开销，不影响静态检查等其它阶段。
 # 恢复：改回 false（或删除本项）即可，无需改动 .gitcode/workflows 下的流水线定义。
 # TODO(临时): 批量代码合入完成后恢复为 false。
-skip_all_tests: true
+skip_all_tests: false
 
 ignore:
   - install_deps.sh

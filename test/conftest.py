@@ -43,6 +43,7 @@ def pytest_configure(config):
         "ignore:.*torch\\.jit\\.script_method.*:DeprecationWarning:torch.jit._script",
     )
 
+
 @pytest.fixture
 def dump_ascendc(monkeypatch, tmp_path):
     monkeypatch.setenv("CANNBOTDSL_DUMP_ASCENDC", "1")
@@ -52,17 +53,21 @@ def dump_ascendc(monkeypatch, tmp_path):
 def dump_mlir(monkeypatch, tmp_path):
     monkeypatch.setenv("CANNBOTDSL_DUMP_MLIR", "1")
 
+
 @pytest.fixture
 def auto_sync(monkeypatch, tmp_path):
     monkeypatch.setenv("CANNBOTDSL_AUTO_SYNC", "1")
+
 
 @pytest.fixture
 def auto_bufid_sync(monkeypatch, tmp_path):
     monkeypatch.setenv("CANNBOTDSL_AUTO_BUFID_SYNC", "1")
 
+
 @pytest.fixture
 def auto_intrablock_sync(monkeypatch, tmp_path):
     monkeypatch.setenv("CANNBOTDSL_AUTO_INTRABLOCKSYNC", "1")
+
 
 @pytest.fixture
 def pipe_stage_transform(monkeypatch):
