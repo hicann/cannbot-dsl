@@ -7575,13 +7575,20 @@ def quant_lightning_indexer(
         device=weights.device,
     )
     candidate_count = max(0, int(candidate_topk_blocks))
-    candidate_indices_2d = torch.empty(
+    # Candidate block-id/length GM workspaces are reused across requests and
+    # the LD merge kernel only (re)initializes active/first-tile rows. Seed
+    # invalid-id (-1) / zero-length so unscheduled rows cannot retain stale
+    # bits from the shared candidate workspace, which downstream QSLI would
+    # otherwise treat as valid block ids or multi-billion tile counts and
+    # drive out-of-bounds GM/UB access.
+    candidate_indices_2d = torch.full(
         (worker_count * 2 * query_tile_rows, candidate_count),
+        -1,
         dtype=torch.int32,
         device=query.device,
     )
-    candidate_length_1d = torch.empty(
-        (t * split_count,), dtype=torch.int32, device=query.device
+    candidate_length_1d = torch.full(
+        (t * split_count,), 0, dtype=torch.int32, device=query.device
     )
 
     key_workspace = torch.empty(
@@ -7617,8 +7624,10 @@ def quant_lightning_indexer(
     final_sparse_values = torch.empty(
         (t, int(topk)), dtype=torch.bfloat16, device=query.device
     )
-    final_candidate_indices = torch.empty(
-        (t, kernel_candidate_count), dtype=torch.int32, device=query.device
+    # Guarantee the public candidate block-id prefix contract (every entry is
+    # a valid block id; -1 marks invalid) even if LD merge leaves a row untouched.
+    final_candidate_indices = torch.full(
+        (t, kernel_candidate_count), -1, dtype=torch.int32, device=query.device
     )
     final_candidate_bits = torch.empty(
         (t, kernel_candidate_count), dtype=torch.uint16, device=query.device
